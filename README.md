@@ -9,10 +9,14 @@ Implemented a chat screen UI with dummy data featuring:
 - Minimum SDK: 24 (Android 7.0)
 
 ## 🏗️ MVVM Architecture
+
+<pre>
 ┌────────────────────┐     ┌────────────────────────┐     ┌────────────────────┐
 │    Composables     │ <-- │      ViewModel         │ <-- │   Dummy Repository  │
-│   (ChatScreen.kt)  │     │   (ChatViewModel.kt)   │     │  (Fake Messages)    │
+│  (ChatScreen.kt)   │     │  (ChatViewModel.kt)    │     │  (Fake Messages)    │
 └────────────────────┘     └────────────────────────┘     └────────────────────┘
+</pre>
+
 
 
 ### Key Components:
