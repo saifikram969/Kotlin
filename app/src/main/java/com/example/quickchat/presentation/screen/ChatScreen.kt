@@ -1,5 +1,5 @@
-
 package com.example.quickchat.presentation.screen
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,13 +24,23 @@ import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.asPaddingValues
+import com.example.quickchat.data.model.ChatMessage
+import com.example.quickchat.data.model.MessageStatus
 
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel = koinViewModel(),
-    roomId: String = "example_room_id",
-    currentUserId: String = "user123"
+    currentUserId: String,
+    otherUserId: String
 ) {
+    // Consistent room ID generation (alphabetical order)
+    val roomId = remember(currentUserId, otherUserId) {
+        listOf(currentUserId, otherUserId).sorted().joinToString("-")
+    }
+
     val uiState by viewModel.uiState.collectAsState()
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -48,7 +58,8 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    // Initialize chat and listener
+    LaunchedEffect(roomId) {
         viewModel.initializeChat(roomId, currentUserId)
     }
 
@@ -57,6 +68,7 @@ fun ChatScreen(
             val messages = (uiState as ChatUiState.Success).messages
             if (messages.isNotEmpty()) {
                 coroutineScope.launch {
+                    delay(100)
                     listState.animateScrollToItem(messages.size - 1)
                 }
             }
@@ -81,7 +93,9 @@ fun ChatScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
-                            onClick = { viewModel.initializeChat(roomId, currentUserId) },
+                            onClick = {
+                                viewModel.initializeChat(roomId, currentUserId)
+                            },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.errorContainer
                             )
@@ -96,14 +110,10 @@ fun ChatScreen(
                 val state = uiState as ChatUiState.Success
                 val (systemMessages, regularMessages) = state.messages.partition { it.isSystemMessage }
 
-                // Show system messages fixed at top (not scrollable)
                 Column(modifier = Modifier.padding(top = 8.dp)) {
-                    systemMessages.forEach { message ->
-                        SystemMessage(message = message)
-                    }
+                    systemMessages.forEach { message -> SystemMessage(message = message) }
                 }
 
-                // Scrollable message list with date headers
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f)
@@ -112,7 +122,7 @@ fun ChatScreen(
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
                     val groupedMessages = regularMessages.groupBy { message ->
-                        SimpleDateFormat("yyyy-MM-dd").format(Date(message.timestamp))
+                        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(message.timestamp))
                     }
 
                     groupedMessages.forEach { (dateKey, messagesForDate) ->
@@ -129,7 +139,6 @@ fun ChatScreen(
                     }
                 }
 
-                // Message input field
                 Column {
                     if (messageText.isNotEmpty()) {
                         Text(
@@ -191,8 +200,8 @@ fun ChatScreen(
                                 onClick = {
                                     if (messageText.isNotBlank() && messageText.length <= maxCharCount) {
                                         viewModel.sendMessage(
-                                            roomId = state.roomId,
-                                            senderId = state.currentUserId,
+                                            roomId = roomId,
+                                            senderId = currentUserId,
                                             text = messageText
                                         )
                                         messageText = ""
@@ -230,7 +239,7 @@ fun ChatScreen(
 
 @Composable
 fun DateHeader(dateKey: String) {
-    val date = SimpleDateFormat("yyyy-MM-dd").parse(dateKey)
+    val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateKey)
     val today = Calendar.getInstance()
     val messageDate = Calendar.getInstance().apply { time = date }
 
@@ -241,7 +250,7 @@ fun DateHeader(dateKey: String) {
         today.get(Calendar.YEAR) == messageDate.get(Calendar.YEAR) &&
                 today.get(Calendar.DAY_OF_YEAR) - 1 == messageDate.get(Calendar.DAY_OF_YEAR) -> "Yesterday"
 
-        else -> SimpleDateFormat("dd MMM yyyy").format(date!!)
+        else -> SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(date!!)
     }
 
     Box(

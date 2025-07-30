@@ -18,6 +18,35 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
     val uiState: StateFlow<ChatUiState> = _uiState
 
     private var systemMessageShown = false
+    private var lastMessageTimestamp = 0L
+
+    fun initializeChat(roomId: String, currentUserId: String) {
+        viewModelScope.launch {
+            try {
+                repository.listenToMessages(roomId).collect { messages ->
+                    val systemMessage = if (!systemMessageShown) {
+                        systemMessageShown = true
+                        ChatMessage(
+                            id = UUID.randomUUID().toString(),
+                            text = "Chat started with $currentUserId",
+                            senderId = "system",
+                            isSystemMessage = true,
+                            status = MessageStatus.SENT,
+                            timestamp = System.currentTimeMillis()
+                        )
+                    } else null
+
+                    _uiState.value = ChatUiState.Success(
+                        messages = (systemMessage?.let { listOf(it) } ?: emptyList()) + messages,
+                        currentUserId = currentUserId,
+                        roomId = roomId
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.value = ChatUiState.Error("Connection error: ${e.message}")
+            }
+        }
+    }
 
     fun sendMessage(roomId: String, senderId: String, text: String) {
         if (text.length > 300) return
@@ -28,7 +57,8 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
             text = text,
             senderId = senderId,
             status = MessageStatus.SENDING,
-            clientGeneratedId = "${senderId}_${System.currentTimeMillis()}"
+            clientGeneratedId = "${senderId}_${System.currentTimeMillis()}",
+            timestamp = System.currentTimeMillis()
         )
 
         updateMessages(newMessage)
@@ -47,7 +77,8 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
     fun retryMessage(roomId: String, message: ChatMessage) {
         val retryMessage = message.copy(
             status = MessageStatus.SENDING,
-            clientGeneratedId = "${message.senderId}_${System.currentTimeMillis()}"
+            clientGeneratedId = "${message.senderId}_${System.currentTimeMillis()}",
+            timestamp = System.currentTimeMillis()
         )
 
         updateMessages(retryMessage)
@@ -58,32 +89,6 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
                 updateMessageStatus(message.id, MessageStatus.SENT)
             } else {
                 updateMessageStatus(message.id, MessageStatus.FAILED)
-            }
-        }
-    }
-
-    fun initializeChat(roomId: String, currentUserId: String) {
-        viewModelScope.launch {
-            repository.listenToMessages(roomId).collectLatest { messagesFromDb ->
-
-                val currentMessages = (_uiState.value as? ChatUiState.Success)?.messages ?: emptyList()
-
-                val systemMessage = ChatMessage(
-                    id = UUID.randomUUID().toString(),
-                    text = "$currentUserId joined the chat",
-                    senderId = "system",
-                    isSystemMessage = true,
-                    status = MessageStatus.SENT
-                )
-
-                _uiState.value = ChatUiState.Success(
-                    messages = if (!systemMessageShown) {
-                        systemMessageShown = true
-                        listOf(systemMessage) + messagesFromDb
-                    } else messagesFromDb,
-                    currentUserId = currentUserId,
-                    roomId = roomId
-                )
             }
         }
     }
