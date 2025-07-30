@@ -136,30 +136,29 @@ No Firebase setup needed (using dummy data)
 
 ### 📂 Firebase Firestore Structure
 
-```plaintext
 Collections:
-└── chats
-    └── {chatId} (document)
-        └── messages (subcollection)
-            └── {messageId} (document)
-                ├── id: String
-                ├── senderId: String
-                ├── text: String
-                ├── timestamp: Long
-                ├── senderName: String
+└── chats  
+    └── {chatId} (document)  
+        └── messages (subcollection)  
+            └── {messageId} (document)  
+                ├── id: String  
+                ├── senderId: String  
+                ├── text: String  
+                ├── timestamp: Long  
+                ├── senderName: String  
                 └── isOnline: Boolean
 
+---
 
+## 📸 Firebase Console Screenshot (Firestore Structure)
 
-##FirebaseConsole Screenshot See the structure of  Firestore Strucutre##
-![WhatsApp Image 2025-07-30 at 19 05 44_0afac9a2](https://github.com/user-attachments/assets/94dedd93-33b1-40a9-adbe-7331b249a94e)
+![Firestore Structure](https://github.com/user-attachments/assets/94dedd93-33b1-40a9-adbe-7331b249a94e)
 
+---
 
-### 🎥 Demo Video
-[![Day 2 Demo](https://github.com/user-attachments/assets/15ffe797-d538-4eb7-bb94-057282528923)
+## 🎥 Demo Video
 
-[End of Day 2]
-
+[![Day 2 Demo Video](https://github.com/user-attachments/assets/15ffe797-d538-4eb7-bb94-057282528923)](https://github.com/user-attachments/assets/15ffe797-d538-4eb7-bb94-057282528923)
 
 
 
