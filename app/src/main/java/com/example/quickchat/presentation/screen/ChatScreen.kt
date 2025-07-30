@@ -1,5 +1,5 @@
-package com.example.quickchat.presentation.screen
 
+package com.example.quickchat.presentation.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -7,7 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,37 +15,56 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.example.quickchat.data.model.ChatMessage
-import com.example.quickchat.presentation.component.DateSeparator
 import com.example.quickchat.presentation.component.MessageBubble
+import com.example.quickchat.presentation.component.SystemMessage
 import com.example.quickchat.presentation.viewmodel.ChatUiState
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Composable
 fun ChatScreen(
-    viewModel: ChatViewModel = koinViewModel()
+    viewModel: ChatViewModel = koinViewModel(),
+    roomId: String = "example_room_id",
+    currentUserId: String = "user123"
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
+    val charCount by remember { derivedStateOf { messageText.length } }
+    val maxCharCount = 300
+    val charCountColor by remember {
+        derivedStateOf {
+            when {
+                charCount > maxCharCount -> Color.Red
+                charCount == maxCharCount -> Color(0xFFFFA000)
+                else -> Color.Gray
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.initializeChat(roomId, currentUserId)
+    }
+
     LaunchedEffect(uiState) {
         if (uiState is ChatUiState.Success) {
             val messages = (uiState as ChatUiState.Success).messages
             if (messages.isNotEmpty()) {
                 coroutineScope.launch {
-                    listState.animateScrollToItem(index = messages.size - 1)
+                    listState.animateScrollToItem(messages.size - 1)
                 }
             }
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        when (val state = uiState) {
+        when (uiState) {
             is ChatUiState.Loading -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
@@ -54,37 +73,78 @@ fun ChatScreen(
 
             is ChatUiState.Error -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(text = state.message)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Error loading chat",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { viewModel.initializeChat(roomId, currentUserId) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text("Retry")
+                        }
+                    }
                 }
             }
 
             is ChatUiState.Success -> {
+                val state = uiState as ChatUiState.Success
+                val (systemMessages, regularMessages) = state.messages.partition { it.isSystemMessage }
+
+                // Show system messages fixed at top (not scrollable)
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    systemMessages.forEach { message ->
+                        SystemMessage(message = message)
+                    }
+                }
+
+                // Scrollable message list with date headers
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(horizontal = 8.dp),
-                    state = listState
+                        .fillMaxWidth(),
+                    state = listState,
+                    contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
-                    items(state.messages) { item ->
-                        when (item) {
-                            is String -> DateSeparator(date = item)
-                            is ChatMessage -> MessageBubble(
-                                message = item,
-                                isCurrentUser = item.senderId == state.currentUserId && !item.isSystemMessage
+                    val groupedMessages = regularMessages.groupBy { message ->
+                        SimpleDateFormat("yyyy-MM-dd").format(Date(message.timestamp))
+                    }
+
+                    groupedMessages.forEach { (dateKey, messagesForDate) ->
+                        item(key = "header_$dateKey") {
+                            DateHeader(dateKey)
+                        }
+
+                        items(messagesForDate, key = { it.id }) { message ->
+                            MessageBubble(
+                                message = message,
+                                isCurrentUser = message.senderId == state.currentUserId
                             )
                         }
                     }
                 }
 
-                // === Updated Chat Input Bar ===
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp)
-                ) {
+                // Message input field
+                Column {
+                    if (messageText.isNotEmpty()) {
+                        Text(
+                            text = "$charCount/$maxCharCount",
+                            color = charCountColor,
+                            modifier = Modifier
+                                .padding(horizontal = 24.dp)
+                                .align(Alignment.End)
+                        )
+                    }
+
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color.White,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
                         shape = RoundedCornerShape(32.dp),
                         tonalElevation = 4.dp
                     ) {
@@ -95,15 +155,13 @@ fun ChatScreen(
                         ) {
                             TextField(
                                 value = messageText,
-                                onValueChange = { messageText = it },
+                                onValueChange = { if (it.length <= maxCharCount) messageText = it },
                                 modifier = Modifier
                                     .weight(1f)
                                     .padding(end = 8.dp),
-                                placeholder = {
-                                    Text("Typine a message...")
-                                },
+                                placeholder = { Text("Type a message...") },
                                 singleLine = false,
-                                maxLines = 3,
+                                maxLines = 5,
                                 shape = RoundedCornerShape(24.dp),
                                 colors = TextFieldDefaults.colors(
                                     focusedContainerColor = Color.Transparent,
@@ -112,28 +170,47 @@ fun ChatScreen(
                                     focusedIndicatorColor = Color.Transparent,
                                     unfocusedIndicatorColor = Color.Transparent,
                                     cursorColor = MaterialTheme.colorScheme.primary,
-                                )
+                                ),
+                                trailingIcon = {
+                                    if (messageText.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { messageText = "" },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Clear",
+                                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                    }
+                                }
                             )
-
-
-                            IconButton(onClick = { /* TODO: Voice input */ }) {
-                                Icon(Icons.Default.Add, contentDescription = "add files")
-                            }
 
                             IconButton(
                                 onClick = {
-                                    viewModel.sendMessage(messageText)
-                                    messageText = ""
-                                    coroutineScope.launch {
-                                        delay(50)
-                                        listState.animateScrollToItem(index = state.messages.size - 1)
+                                    if (messageText.isNotBlank() && messageText.length <= maxCharCount) {
+                                        viewModel.sendMessage(
+                                            roomId = state.roomId,
+                                            senderId = state.currentUserId,
+                                            text = messageText
+                                        )
+                                        messageText = ""
+                                        coroutineScope.launch {
+                                            delay(50)
+                                            listState.animateScrollToItem(index = state.messages.size)
+                                        }
                                     }
                                 },
-                                enabled = messageText.isNotBlank(),
+                                enabled = messageText.isNotBlank() && messageText.length <= maxCharCount,
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(48.dp)
                                     .background(
-                                        if (messageText.isNotBlank()) Color.Black else Color.LightGray,
+                                        if (messageText.isNotBlank() && messageText.length <= maxCharCount) {
+                                            Color.Black
+                                        } else {
+                                            Color.LightGray
+                                        },
                                         shape = RoundedCornerShape(50)
                                     )
                             ) {
@@ -148,5 +225,41 @@ fun ChatScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun DateHeader(dateKey: String) {
+    val date = SimpleDateFormat("yyyy-MM-dd").parse(dateKey)
+    val today = Calendar.getInstance()
+    val messageDate = Calendar.getInstance().apply { time = date }
+
+    val label = when {
+        today.get(Calendar.YEAR) == messageDate.get(Calendar.YEAR) &&
+                today.get(Calendar.DAY_OF_YEAR) == messageDate.get(Calendar.DAY_OF_YEAR) -> "Today"
+
+        today.get(Calendar.YEAR) == messageDate.get(Calendar.YEAR) &&
+                today.get(Calendar.DAY_OF_YEAR) - 1 == messageDate.get(Calendar.DAY_OF_YEAR) -> "Yesterday"
+
+        else -> SimpleDateFormat("dd MMM yyyy").format(date!!)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+            modifier = Modifier
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        )
     }
 }

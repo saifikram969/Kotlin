@@ -1,57 +1,69 @@
 package com.example.quickchat.data.repository
 
+import android.util.Log
 import com.example.quickchat.data.model.ChatMessage
-import java.util.UUID
+import com.example.quickchat.data.model.MessageStatus
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.tasks.await
 
+class ChatRepository(private val database: FirebaseFirestore) {
 
-class ChatRepository {
-    private val dummyMessages = mutableListOf(
-        ChatMessage(
-            id = "1",
-            text = "Andres joined the chat!",
-            senderId = "user1",
-            timestamp = System.currentTimeMillis() - 10000,
-            isSystemMessage = true
-        ),
-        ChatMessage(
-            id = "2",
-            text = "Hi! How are you?",
-            senderId = "user2",
-            timestamp = System.currentTimeMillis() - 5000
-        ),
-        ChatMessage(
-            id = "3",
-            text = "I'm good, thanks!",
-            senderId = "user1",
-            timestamp = System.currentTimeMillis()
-        ), ChatMessage(
-                id = "3",
-        text = "I'm good, thanks!",
-        senderId = "user1",
-        timestamp = System.currentTimeMillis()
-    ), ChatMessage(
-    id = "3",
-    text = "I'm good, thanks!",
-    senderId = "user1",
-    timestamp = System.currentTimeMillis()
-    )
-    )
-
-    fun getMessages(): List<ChatMessage> = dummyMessages
-
-    fun addMessage(message: ChatMessage) {
-        println("Adding message: ${message.text}")
-
-        dummyMessages.add(message)
-    }
-    fun addSystemMessage(text: String) {
-        dummyMessages.add(
-            ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = text,
-                senderId = "system",
-                isSystemMessage = true
+    suspend fun sendMessage(roomId: String, message: ChatMessage): Result<Unit> {
+        return try {
+            val messageData = hashMapOf(
+                "id" to message.id,
+                "text" to message.text,
+                "senderId" to message.senderId,
+                "timestamp" to message.timestamp,
+                "status" to message.status.name,
+                "clientGeneratedId" to message.clientGeneratedId,
+                "isSystemMessage" to message.isSystemMessage
             )
-        )
+
+            database.collection("chatrooms")
+                .document(roomId)
+                .collection("messages")
+                .document(message.id)
+                .set(messageData)
+                .await()
+
+            Log.d("ChatRepository", "Message sent successfully: ${message.id}")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("ChatRepository", "Failed to send message: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    fun listenToMessages(roomId: String) = callbackFlow<List<ChatMessage>> {
+        val listener = database.collection("chatrooms")
+            .document(roomId)
+            .collection("messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("ChatRepository", "Listen failed", error)
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val messages = snapshot?.documents?.mapNotNull {
+                    try {
+                        it.toObject(ChatMessage::class.java)?.copy(
+                            status = MessageStatus.valueOf(it.getString("status") ?: "SENT")
+                        )
+                    } catch (e: Exception) {
+                        Log.e("ChatRepository", "Error parsing message", e)
+                        null
+                    }
+                } ?: emptyList()
+
+                trySend(messages)
+            }
+
+        awaitClose { listener.remove() }
     }
 }
