@@ -105,3 +105,63 @@ No Firebase setup needed (using dummy data)
 5. System messages
 
 [End of Day 1]
+
+# QuickChat - Day 2: Firebase Integration
+## 🔥 Firebase Implementation
+
+
+### ✅ What was done
+- Integrated **Firebase Firestore** for real-time chat syncing
+- Wrapped Firebase calls using a **sealed `Result<T>` class** for clean error handling
+- Added **input validation** to limit message input to **300 characters**
+- Implemented **message delivery status** using a `MessageStatus` sealed class and dynamic icons:
+  - 🕐 `SENDING`
+  - ✅ `SENT`
+  - ❌ `FAILED`
+- Updated ViewModel and Repository to use state management with sealed classes
+- Fixed UI issues related to `TopAppBar` and message rendering
+
+---
+
+### 💡 Design Decisions
+- ✅ Chose **Firestore** over Realtime DB:
+  - Built-in offline support
+  - Better scalability and query support
+  - Real-time listeners simplify UI state sync
+- ✅ Used `LaunchedEffect` and `snapshotFlow` for scroll position behavior
+- ✅ Used manual check for character limit (`message.length <= 300`)
+- ✅ Added online/offline **status icon** for better UX
+
+---
+
+### 📂 Firebase Firestore Structure
+
+```plaintext
+Collections:
+└── chats
+    └── {chatId} (document)
+        └── messages (subcollection)
+            └── {messageId} (document)
+                ├── id: String
+                ├── senderId: String
+                ├── text: String
+                ├── timestamp: Long
+                ├── senderName: String
+                └── isOnline: Boolean
+
+
+
+##FirebaseConsole Screenshot See the structure of  Firestore Strucutre##
+![WhatsApp Image 2025-07-30 at 19 05 44_0afac9a2](https://github.com/user-attachments/assets/94dedd93-33b1-40a9-adbe-7331b249a94e)
+
+
+### 🎥 Demo Video
+[![Day 2 Demo](https://github.com/user-attachments/assets/15ffe797-d538-4eb7-bb94-057282528923)
+
+[End of Day 2]
+
+
+
+
+
+
