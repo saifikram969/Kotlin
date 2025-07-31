@@ -5,7 +5,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    id("com.google.gms.google-services") // ✅ THIS IS CORRECT
+    id("com.google.gms.google-services")
+    kotlin("kapt")
 
 }
 
@@ -111,7 +112,11 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.8.3")
 
         implementation ("androidx.compose.material3:material3:1.3.2") // or latest stable
-
+     //room db
+    implementation ("androidx.room:room-runtime:2.7.2")
+    implementation ("androidx.room:room-ktx:2.7.2")
+    kapt ("androidx.room:room-compiler:2.7.2")
+    implementation ("androidx.room:room-paging:2.7.2")
 
 
 

@@ -6,131 +6,168 @@ import androidx.lifecycle.viewModelScope
 import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.MessageStatus
 import com.example.quickchat.data.repository.ChatRepository
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
-import kotlin.coroutines.cancellation.CancellationException
 
 class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
-    //viewmodel lifecycle tracking
+
+    private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
+    val uiState: StateFlow<ChatUiState> = _uiState
+
     init {
         Log.d("VM_LIFECYCLE", "ViewModel INITIALIZED - Hash: ${hashCode()}")
     }
 
     override fun onCleared() {
-        Log.d("VM_LIFECYCLE", "ViewModel DESTROYED - Hash: ${hashCode()}")
         super.onCleared()
     }
-    private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
-    val uiState: StateFlow<ChatUiState> = _uiState
-
-    private var systemMessageShown = false
-    private var lastMessageTimestamp = 0L
 
     fun initializeChat(roomId: String, currentUserId: String) {
-        Log.d("LISTENER_CTRL", "Starting listener for room: $roomId")
 
         viewModelScope.launch {
-            repository.listenToMessages(roomId)
-                .distinctUntilChanged()
-                .catch { e ->
-                    if (e !is CancellationException) {
-                        Log.e("LISTENER_ERROR", "Listener error:", e)
-                        _uiState.value = ChatUiState.Error("Connection error")
+            try {
+                combine(
+                    repository.getCachedMessages(roomId),
+
+                    repository.listenToMessages(roomId)
+                ) { cached, remote ->
+                    // Merge both and remove duplicates (prefer remote messages)
+                    val merged = (cached + remote)
+                        .distinctBy { it.id }
+                        .sortedBy { it.timestamp }
+
+                    Log.d("VIEWMODEL", "📥 Total merged messages: ${merged.size}")
+                    merged
+                }
+                    .distinctUntilChanged()
+                    .catch { e ->
+                        _uiState.value = ChatUiState.Error("Failed to load chat")
                     }
-                }
-                .collect { messages ->
-                    Log.d("LISTENER_DATA", "Received ${messages.size} messages")
-
-                    val systemMessage = if (!systemMessageShown) {
-                        systemMessageShown = true
-                        ChatMessage(
-                            id = UUID.randomUUID().toString(),
-                            text = "Chat started with $currentUserId",
-                            senderId = "system",
-                            isSystemMessage = true,
-                            status = MessageStatus.SENT,
-                            timestamp = System.currentTimeMillis()
+                    .collectLatest { allMessages ->
+                        _uiState.value = ChatUiState.Success(
+                            messages = allMessages,
+                            currentUserId = currentUserId,
+                            roomId = roomId
                         )
-                    } else null
-
-                    _uiState.value = ChatUiState.Success(
-                        messages = (systemMessage?.let { listOf(it) } ?: emptyList()) + messages,
-                        currentUserId = currentUserId,
-                        roomId = roomId
-                    )
-                }
+                    }
+            } catch (e: Exception) {
+                _uiState.value = ChatUiState.Error("Unexpected error occurred")
+            }
         }
     }
 
     fun sendMessage(roomId: String, senderId: String, text: String) {
-        if (text.length > 300) return
+        if (text.length > 300) {
+            return
+        }
 
-        val id = UUID.randomUUID().toString()
+        val messageId = UUID.randomUUID().toString()
+        val clientGenId = "${senderId}_${System.currentTimeMillis()}"
+        val timestamp = System.currentTimeMillis()
+
         val newMessage = ChatMessage(
-            id = id,
+            id = messageId,
             text = text,
             senderId = senderId,
             status = MessageStatus.SENDING,
-            clientGeneratedId = "${senderId}_${System.currentTimeMillis()}",
-            timestamp = System.currentTimeMillis()
+            clientGeneratedId = clientGenId,
+            timestamp = timestamp
         )
 
         updateMessages(newMessage)
 
         viewModelScope.launch {
-            val result = repository.sendMessage(roomId, newMessage)
-            if (result.isSuccess) {
-                updateMessageStatus(id, MessageStatus.SENT)
-            } else {
-                updateMessageStatus(id, MessageStatus.FAILED)
-                Log.e("ChatViewModel", "Failed to send message", result.exceptionOrNull())
+            repository.cacheMessage(roomId, newMessage)
+
+            val result = runCatching {
+                repository.sendMessage(roomId, newMessage)
             }
+
+            val finalStatus = if (result.getOrNull()?.isSuccess == true) {
+                MessageStatus.SENT
+            } else {
+                MessageStatus.FAILED
+            }
+
+            updateMessageStatus(messageId, finalStatus)
+            repository.updateMessageStatus(messageId, finalStatus)
         }
     }
-//retry message
+
     fun retryMessage(roomId: String, message: ChatMessage) {
-        val retryMessage = message.copy(
+        val newClientId = "${message.senderId}_${System.currentTimeMillis()}"
+
+        val retriedMessage = message.copy(
             status = MessageStatus.SENDING,
-            clientGeneratedId = "${message.senderId}_${System.currentTimeMillis()}",
+            clientGeneratedId = newClientId,
             timestamp = System.currentTimeMillis()
         )
 
-        updateMessages(retryMessage)
+        updateMessages(retriedMessage)
 
         viewModelScope.launch {
-            val result = repository.sendMessage(roomId, retryMessage)
-            if (result.isSuccess) {
-                updateMessageStatus(message.id, MessageStatus.SENT)
-            } else {
-                updateMessageStatus(message.id, MessageStatus.FAILED)
+            repository.cacheMessage(roomId, retriedMessage)
+
+            val result = runCatching {
+                repository.sendMessage(roomId, retriedMessage)
             }
+
+            val finalStatus = if (result.getOrNull()?.isSuccess == true) {
+                MessageStatus.SENT
+            } else {
+                MessageStatus.FAILED
+            }
+
+            updateMessageStatus(retriedMessage.id, finalStatus)
+            repository.updateMessageStatus(retriedMessage.id, finalStatus)
         }
     }
 
     private fun updateMessages(newMessage: ChatMessage) {
-        val currentState = _uiState.value
-        if (currentState is ChatUiState.Success) {
-            _uiState.value = currentState.copy(
-                messages = currentState.messages + newMessage
+        val state = _uiState.value
+        if (state is ChatUiState.Success) {
+            _uiState.value = state.copy(
+                messages = (state.messages + newMessage)
+                    .distinctBy { it.id }
+                    .sortedBy { it.timestamp }
             )
         }
     }
 
     private fun updateMessageStatus(messageId: String, status: MessageStatus) {
-        val currentState = _uiState.value
-        if (currentState is ChatUiState.Success) {
-            val updatedMessages = currentState.messages.map {
+        val state = _uiState.value
+        if (state is ChatUiState.Success) {
+            val updatedMessages = state.messages.map {
                 if (it.id == messageId) it.copy(status = status) else it
             }
-            _uiState.value = currentState.copy(messages = updatedMessages)
+            _uiState.value = state.copy(messages = updatedMessages)
         }
     }
+
+
+
+
+    fun onNetworkRestored(roomId: String) {
+        viewModelScope.launch {
+            // Sync message gaps first
+            repository.syncMessageGaps(roomId)
+
+            // Then retry any failed messages
+            val failedMessages = repository.getFailedMessages(roomId)
+            failedMessages.forEach { message ->
+                retryMessage(roomId, message)
+            }
+        }
+    }
+
+
+
 }
+
+
+
+
 
 sealed class ChatUiState {
     object Loading : ChatUiState()
@@ -139,5 +176,6 @@ sealed class ChatUiState {
         val currentUserId: String,
         val roomId: String
     ) : ChatUiState()
+
     data class Error(val message: String) : ChatUiState()
 }

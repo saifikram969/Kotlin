@@ -19,16 +19,13 @@ import com.example.quickchat.presentation.component.MessageBubble
 import com.example.quickchat.presentation.component.SystemMessage
 import com.example.quickchat.presentation.viewmodel.ChatUiState
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
+import com.example.quickchat.utils.connectivityState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.asPaddingValues
-import com.example.quickchat.data.model.ChatMessage
-import com.example.quickchat.data.model.MessageStatus
+
 
 @Composable
 fun ChatScreen(
@@ -57,6 +54,19 @@ fun ChatScreen(
             }
         }
     }
+
+    //sync message
+    var wasOffline by remember { mutableStateOf(false) }
+    val isOnline by connectivityState()
+
+    LaunchedEffect(isOnline) {
+        if (isOnline && wasOffline) {
+            viewModel.onNetworkRestored(roomId)
+        }
+        wasOffline = !isOnline
+    }
+
+
 
     // Initialize chat and listener
     LaunchedEffect(roomId) {
