@@ -8,12 +8,23 @@ import com.example.quickchat.data.model.MessageStatus
 import com.example.quickchat.data.repository.ChatRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.util.*
+import kotlin.coroutines.cancellation.CancellationException
 
 class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
+    //viewmodel lifecycle tracking
+    init {
+        Log.d("VM_LIFECYCLE", "ViewModel INITIALIZED - Hash: ${hashCode()}")
+    }
 
+    override fun onCleared() {
+        Log.d("VM_LIFECYCLE", "ViewModel DESTROYED - Hash: ${hashCode()}")
+        super.onCleared()
+    }
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
     val uiState: StateFlow<ChatUiState> = _uiState
 
@@ -21,9 +32,20 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
     private var lastMessageTimestamp = 0L
 
     fun initializeChat(roomId: String, currentUserId: String) {
+        Log.d("LISTENER_CTRL", "Starting listener for room: $roomId")
+
         viewModelScope.launch {
-            try {
-                repository.listenToMessages(roomId).collect { messages ->
+            repository.listenToMessages(roomId)
+                .distinctUntilChanged()
+                .catch { e ->
+                    if (e !is CancellationException) {
+                        Log.e("LISTENER_ERROR", "Listener error:", e)
+                        _uiState.value = ChatUiState.Error("Connection error")
+                    }
+                }
+                .collect { messages ->
+                    Log.d("LISTENER_DATA", "Received ${messages.size} messages")
+
                     val systemMessage = if (!systemMessageShown) {
                         systemMessageShown = true
                         ChatMessage(
@@ -42,9 +64,6 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
                         roomId = roomId
                     )
                 }
-            } catch (e: Exception) {
-                _uiState.value = ChatUiState.Error("Connection error: ${e.message}")
-            }
         }
     }
 
@@ -73,7 +92,7 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
             }
         }
     }
-
+//retry message
     fun retryMessage(roomId: String, message: ChatMessage) {
         val retryMessage = message.copy(
             status = MessageStatus.SENDING,

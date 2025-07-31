@@ -47,13 +47,15 @@ class ChatRepository(private val database: FirebaseFirestore) {
     }
 
     fun listenToMessages(roomId: String): Flow<List<ChatMessage>> = callbackFlow {
+        Log.d("LISTENER_DEBUG", " Listener STARTED for $roomId")
+
         val listener = database.collection("chatrooms")
             .document(roomId)
             .collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("ChatRepository", "Listen failed", error)
+                    Log.e("FirestoreError", "Listen failed", error)
                     trySend(emptyList())
                     return@addSnapshotListener
                 }
@@ -65,33 +67,17 @@ class ChatRepository(private val database: FirebaseFirestore) {
                             timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
                         )
                     } catch (e: Exception) {
-                        Log.e("ChatRepository", "Parse error: ${doc.id}", e)
+                        Log.e("ParseError", "Error parsing message", e)
                         null
                     }
-                }?.distinctBy { it.clientGeneratedId } ?: emptyList()
+                } ?: emptyList()
 
                 trySend(messages)
             }
 
-        // Optional: Load initial messages
-        database.collection("chatrooms")
-            .document(roomId)
-            .collection("messages")
-            .get()
-            .addOnSuccessListener { snapshot ->
-                val initialMessages = snapshot.documents.mapNotNull { doc ->
-                    try {
-                        doc.toObject(ChatMessage::class.java)?.copy(
-                            status = MessageStatus.valueOf(doc.getString("status") ?: "SENT"),
-                            timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
-                        )
-                    } catch (e: Exception) {
-                        null
-                    }
-                }
-                trySend(initialMessages)
-            }
-
-        awaitClose { listener.remove() }
+        awaitClose {
+            Log.d("LISTENER_DEBUG", " Listener CLEANED for $roomId")
+            listener.remove()
+        }
     }
 }
