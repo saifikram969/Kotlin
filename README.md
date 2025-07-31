@@ -159,6 +159,99 @@ Collections:
 ## 🎥 Demo Video
 
 [![Day 2 Demo Video](https://github.com/user-attachments/assets/15ffe797-d538-4eb7-bb94-057282528923)](https://github.com/user-attachments/assets/15ffe797-d538-4eb7-bb94-057282528923)
+proper headers, emoji, table, code formatting, and bullet styles):
+
+
+###                                                ###
+## 🔄 QuickChat – Day 3: Real-Time Message Listener
+
+### ✅ What was done
+
+Today we implemented **real-time chat updates** using Firebase Firestore’s `addSnapshotListener` and enhanced message handling through Room for **offline caching**.
+
+---
+
+### 📋 Feature Summary
+
+| Feature                        | Status  |
+|-------------------------------|---------|
+| Firestore real-time listener  | ✅ Done |
+| UI auto-update on new message | ✅ Done |
+| Timestamp-based sorting       | ✅ Done |
+| Auto-scroll for own messages  | ✅ Done |
+| Listener deduplication        | ✅ Done |
+| Memory leak prevention        | ✅ Done |
+| Room offline caching          | ✅ Done |
+| Sync gaps on reconnect        | ✅ Done |
+
+---
+
+### 📡 Listener Lifecycle Management
+
+- Attached once per chat room using `addSnapshotListener`.
+- Listener is **removed on dispose** to prevent memory leaks.
+- Ensured only **one active listener** per room.
+- Used `distinctUntilChanged` and message IDs to **avoid duplicates**.
+
+---
+
+### 🧠 Message Deduplication
+
+- Each message has a **unique ID** (`UUID`).
+- ViewModel keeps a `Set<String>` of received IDs.
+- New messages are checked against cache to **avoid double insertion**.
+
+---
+
+### 🧭 Auto-Scroll Behavior
+
+- Auto-scroll is triggered **only for messages sent by self**.
+- Incoming messages from others **do not auto-scroll**, preserving the scroll position.
+- Implemented using `LazyListState.isScrolledToBottom` and `snapshotFlow`.
+
+---
+
+### 🗂️ Offline Caching (Room)
+
+- Messages are saved in **Room** for offline access.
+- On reconnect:
+  - Loads cached messages via `loadCachedMessages()`.
+  - Syncs missing messages from Firebase using **timestamp comparison**.
+
+---
+
+### 🧪 Testing & Observations
+
+- ✅ Cached messages load instantly after restart.
+- ✅ Works in offline mode (read-only).
+- ✅ On reconnect, missing messages are synced.
+- ✅ Confirmed real-time sync with **two-device testing**.
+
+---
+
+### 📽️ Demo Video 
+###  Check your email
+**▶️ Day 3 – Two Device Real-Time Chat Demo**
+
+Includes:
+- Sending/receiving messages across devices
+- Live UI updates
+- Offline fallback
+- Reconnect + sync logic
+
+---
+
+### ✅ Day 3 Deliverables
+
+- ✅ Firebase Firestore real-time listener
+- ✅ UI state updates with ViewModel
+- ✅ Offline caching using Room
+- ✅ Reconnect sync logic
+- ✅ Message deduplication and scroll logic
+
+### Room Test in Logcat ![WhatsApp Image 2025-07-31 at 16 47 28_e7eee87a](https://github.com/user-attachments/assets/421431c8-f9a9-4316-a544-0506eda2ac9f)
+
+
 
 
 
