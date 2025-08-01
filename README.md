@@ -252,7 +252,96 @@ Includes:
 ### Room Test in Logcat ![WhatsApp Image 2025-07-31 at 16 47 28_e7eee87a](https://github.com/user-attachments/assets/421431c8-f9a9-4316-a544-0506eda2ac9f)
 
 
+## 💬 QuickChat – Day 4: Chatroom List + Unread Count
 
+---
+
+### ✅ What was done
+
+Today we implemented the **Chatroom List UI** showing:
+ 
+
+This enhances user experience by surfacing conversation context without opening each room.
+
+---
+
+### 📋 Feature Summary
+
+| Feature                                | Status  |
+|---------------------------------------|---------|
+| `ChatRoomListScreen` UI               | ✅ Done |
+| `ChatRoom` data model                 | ✅ Done |
+| Firebase Firestore room fetching      | ✅ Done |
+| Display avatar, name, last message    | ✅ Done |
+
+---
+
+### 🧱 ChatRoom Data Model
+
+```kotlin
+data class ChatRoom(
+    val roomId: String,
+    val lastMessage: String?,
+    val lastTimestamp: Long,
+    val unreadCount: Int
+)
+
+```
+
+---
+
+### 🔄 Unread Count Logic
+
+- Each message has a `timestamp`.
+- Each user has a `lastReadTimestamp` per room.
+
+---
+
+### 🧪 Real-Time Unread Tracking
+
+- Used Firestore snapshot listener on `messages` subcollection.
+- Listener checks timestamp against user’s `lastReadTimestamp`.
+- `ChatRoomListScreen` reflects changes instantly using `StateFlow`.
+
+---
+
+### 🧭 UI Elements
+
+- **Avatar**: loaded from user profile.
+- **Name**: derived from chat participant ID.
+- **Last message**: shows text preview or media tag.
+- **Time**: human-readable (e.g., "5 mins ago")
+- **Unread count**: visible as a badge (hidden if zero).
+
+---
+
+### 🚀 Stretch Features (To-do)
+
+| Feature                    | Status  |
+|---------------------------|---------|
+| Swipe to delete/archive   | ❌ Not yet |
+| Mute/unmute per room      | ❌ Not yet |
+| Pin chats to top          | ❌ Not yet |
+| Archive older chats       | ❌ Not yet |
+| Timestamp formatting (e.g., "2 min ago") | ❌ Not yet |
+| Unread count calculation              |  ❌ Not yet |
+| Real-time unread count updates        | ❌ Not yet|
+
+
+---
+
+- Tap on any chatroom to navigate to the full chat screen.
+
+---
+
+### ✅ Day 4 Deliverables
+
+- ✅ ChatRoom model created
+- ✅ Firebase fetch for current user's chatrooms
+- ✅ Last message + time displayed
+- ✅ Room navigation works with live data
+- [End of dat 4]
+  
 
 
 
