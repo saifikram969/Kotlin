@@ -57,6 +57,10 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation.runtime.android)
     implementation(libs.firebase.firestore.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.activity)
+    implementation(libs.androidx.constraintlayout)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -117,6 +121,11 @@ dependencies {
     implementation ("androidx.room:room-ktx:2.7.2")
     kapt ("androidx.room:room-compiler:2.7.2")
     implementation ("androidx.room:room-paging:2.7.2")
+
+    //coil for image
+   // implementation("io.coil-kt.coil3:coil-compose:3.3.0")
+    //gson
+    implementation("com.google.code.gson:gson:2.13.1")
 
 
 

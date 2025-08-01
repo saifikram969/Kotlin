@@ -11,12 +11,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.example.quickchat.navigation.ChatAppNavHost
+import com.example.quickchat.presentation.screen.ChatScreen
 import com.example.quickchat.ui.theme.QuickChatTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+
         setContent {
             QuickChatTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -27,6 +28,8 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.background
                     ) {
                         ChatAppNavHost()
+                       // ChatScreen(currentUserId = "user1", otherUserId = "user2")
+
                     }
                 }
 
