@@ -14,6 +14,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
+private const val CHATROOMS_COLLECTION = "chatrooms" // lowercase everywhere
 
 class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
 
@@ -61,45 +62,41 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
     }
 
     fun sendMessage(roomId: String, senderId: String, text: String) {
-        if (text.length > 300) return
-
-        val messageId = UUID.randomUUID().toString()
-        val clientGenId = "${senderId}_${System.currentTimeMillis()}"
-        val timestamp = System.currentTimeMillis()
-
-        val newMessage = ChatMessage(
-            id = messageId,
-            text = text,
-            senderId = senderId,
-            status = MessageStatus.SENDING,
-            clientGeneratedId = clientGenId,
-            timestamp = timestamp
-        )
-
-        updateMessages(newMessage)
+        // Add validation
+        if (text.isBlank() || text.length > 300) return
 
         viewModelScope.launch {
-            repository.cacheMessage(roomId, newMessage)
+            try {
+                // Update UI immediately
+                val newMessage = createMessage(senderId, text)
+                updateMessages(newMessage)
 
-            val result = runCatching {
-                repository.sendMessage(roomId, newMessage)
+                // Send to Firestore
+                repository.sendMessage(roomId, newMessage).onSuccess {
+                    updateMessageStatus(newMessage.id, MessageStatus.SENT)
+                }.onFailure { e ->
+                    updateMessageStatus(newMessage.id, MessageStatus.FAILED)
+                    Log.e("SEND_ERROR", "Failed to send", e)
+                }
+            } catch (e: Exception) {
+                Log.e("SEND_ERROR", "Unexpected error", e)
             }
-
-            val finalStatus = if (result.getOrNull()?.isSuccess == true) {
-                MessageStatus.SENT
-            } else {
-                MessageStatus.FAILED
-            }
-
-            updateMessageStatus(messageId, finalStatus)
-            repository.updateMessageStatus(messageId, finalStatus)
         }
     }
     val _otherUserTyping = MutableStateFlow<String?>(null)
     val otherUserTyping: StateFlow<String?> = _otherUserTyping
-
+    private fun createMessage(senderId: String, text: String): ChatMessage {
+        return ChatMessage(
+            id = UUID.randomUUID().toString(),
+            text = text,
+            senderId = senderId,
+            timestamp = System.currentTimeMillis(),
+            status = MessageStatus.SENDING,
+            clientGeneratedId = "${senderId}_${System.currentTimeMillis()}"
+        )
+    }
     fun observeTypingStatus(roomId: String, currentUserId: String) {
-        Firebase.firestore.collection("chatRooms")
+        Firebase.firestore.collection(CHATROOMS_COLLECTION)
             .document(roomId)
             .collection("typingStatus")
             .addSnapshotListener { snapshot, _ ->
@@ -184,7 +181,7 @@ class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
 
     fun updateTypingStatus(roomId: String, userId: String, isTyping: Boolean) {
         val typingRef = Firebase.firestore
-            .collection("chatRooms")
+            .collection(CHATROOMS_COLLECTION)
             .document(roomId)
             .collection("typingStatus")
             .document(userId)

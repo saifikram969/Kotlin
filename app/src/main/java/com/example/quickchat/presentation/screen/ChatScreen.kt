@@ -34,13 +34,10 @@ import java.util.*
 fun ChatScreen(
     viewModel: ChatViewModel = koinViewModel(),
     currentUserId: String,
+    roomId: String,
     otherUserId: String,
     onBackClick: () -> Unit
 ) {
-    val roomId = remember(currentUserId, otherUserId) {
-        listOf(currentUserId, otherUserId).sorted().joinToString("-")
-    }
-
     val uiState by viewModel.uiState.collectAsState()
     val typingUserId by viewModel.typingUserId.collectAsState()
     var messageText by remember { mutableStateOf("") }
@@ -78,7 +75,7 @@ fun ChatScreen(
         ChatTopBar(
             chatRoomName = "Chat Room",
             participantName = otherUserId,
-            onBackClick = {},
+            onBackClick = onBackClick,
             onMoreOptionsClick = {}
         )
 
@@ -88,6 +85,7 @@ fun ChatScreen(
                     CircularProgressIndicator()
                 }
             }
+
             is ChatUiState.Error -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -110,6 +108,7 @@ fun ChatScreen(
                     }
                 }
             }
+
             is ChatUiState.Success -> {
                 val state = uiState as ChatUiState.Success
                 val (systemMessages, regularMessages) = state.messages.partition { it.isSystemMessage }
@@ -117,9 +116,10 @@ fun ChatScreen(
                 LaunchedEffect(state.messages.size) {
                     coroutineScope.launch {
                         delay(200)
-                        if (state.messages.isNotEmpty()) {  // Add this check
-                            listState.scrollToItem(state.messages.size - 1)                    }
-                }
+                        if (state.messages.isNotEmpty()) {
+                            listState.scrollToItem(state.messages.size - 1)
+                        }
+                    }
                 }
 
                 Column(modifier = Modifier.padding(top = 8.dp)) {
@@ -205,7 +205,6 @@ fun ChatScreen(
                                     if (it.length <= maxCharCount) {
                                         messageText = it
                                         viewModel.updateTypingStatus(roomId, currentUserId, true)
-                                        //viewModel.debounceTyping(roomId, currentUserId)
                                     }
                                 },
                                 modifier = Modifier
@@ -250,7 +249,7 @@ fun ChatScreen(
                                         messageText = ""
                                         coroutineScope.launch {
                                             delay(50)
-                                            if (state.messages.isNotEmpty()) {  // Add this check
+                                            if (state.messages.isNotEmpty()) {
                                                 listState.animateScrollToItem(state.messages.size - 1)
                                             }
                                         }

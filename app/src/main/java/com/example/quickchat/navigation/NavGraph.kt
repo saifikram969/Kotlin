@@ -1,23 +1,15 @@
 package com.example.quickchat.navigation
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.material3.Button
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
-import androidx.navigation.NavHostController
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
+import androidx.navigation.*
+import androidx.navigation.compose.*
 import com.example.quickchat.presentation.screen.ChatRoomListScreen
 import com.example.quickchat.presentation.screen.ChatScreen
+
 @Composable
 fun ChatAppNavHost(
     navController: NavHostController = rememberNavController()
@@ -26,19 +18,20 @@ fun ChatAppNavHost(
         navController = navController,
         startDestination = "user_selection"
     ) {
+        // User selection screen
         composable("user_selection") {
-            UserSelectionScreen { userId ->
-                // Navigate to chat rooms list
-                navController.navigate("chat_rooms/$userId")
+            UserSelectionScreen { selectedUserId ->
+                navController.navigate("chat_rooms/$selectedUserId")
             }
         }
 
+        // Chat rooms list screen
         composable("chat_rooms/{userId}") { backStackEntry ->
             val userId = backStackEntry.arguments?.getString("userId") ?: ""
             ChatRoomListScreen(
                 userId = userId,
-                onChatRoomClick = { roomId ->
-                    navController.navigate("chat/$userId/$roomId") {
+                onChatRoomClick = { roomId, otherUserId ->  // Now takes two parameters
+                    navController.navigate("chat/$userId/$roomId/$otherUserId") {
                         launchSingleTop = true
                     }
                 },
@@ -48,17 +41,16 @@ fun ChatAppNavHost(
             )
         }
 
-        composable("chat/{currentUserId}/{otherUserId}") { backStackEntry ->
+        // Chat screen
+        composable("chat/{currentUserId}/{roomId}/{otherUserId}") { backStackEntry ->
             val currentUserId = backStackEntry.arguments?.getString("currentUserId") ?: ""
+            val roomId = backStackEntry.arguments?.getString("roomId") ?: ""
             val otherUserId = backStackEntry.arguments?.getString("otherUserId") ?: ""
-            // Generate roomId for your existing ChatScreen
-            val roomId = remember(currentUserId, otherUserId) {
-                listOf(currentUserId, otherUserId).sorted().joinToString("-")
-            }
 
             ChatScreen(
                 currentUserId = currentUserId,
-                otherUserId = otherUserId, // Keep original parameter
+                roomId = roomId,
+                otherUserId = otherUserId,
                 onBackClick = {
                     navController.popBackStack()
                 }
@@ -67,16 +59,34 @@ fun ChatAppNavHost(
     }
 }
 
+// Helper function moved outside NavHost for better organization
+private fun generateRoomId(user1: String, user2: String): String {
+    return listOf(user1, user2).sorted().joinToString("-")
+}
+
 @Composable
 fun UserSelectionScreen(
     onUserSelected: (String) -> Unit
 ) {
-    Column(Modifier.fillMaxSize(), Arrangement.Center) {
-        Button(onClick = { onUserSelected("user1") }) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Button(
+            onClick = { onUserSelected("user1") },
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Text("Login as User 1")
         }
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = { onUserSelected("user2") }) {
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = { onUserSelected("user2") },
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Text("Login as User 2")
         }
     }

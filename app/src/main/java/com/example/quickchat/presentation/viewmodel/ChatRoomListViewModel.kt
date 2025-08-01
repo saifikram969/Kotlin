@@ -16,7 +16,6 @@ class ChatRoomListViewModel @Inject constructor(
     private val userId: String
 ) : ViewModel() {
 
-
     // Chat Rooms State
     private val _chatRooms = MutableStateFlow<List<ChatRoom>>(emptyList())
     val chatRooms: StateFlow<List<ChatRoom>> = _chatRooms
@@ -33,9 +32,6 @@ class ChatRoomListViewModel @Inject constructor(
     private val _roomCreationState = MutableStateFlow<RoomCreationState>(RoomCreationState.Idle)
     val roomCreationState: StateFlow<RoomCreationState> = _roomCreationState
 
-
-
-
     sealed class RoomCreationState {
         object Idle : RoomCreationState()
         object Loading : RoomCreationState()
@@ -47,8 +43,8 @@ class ChatRoomListViewModel @Inject constructor(
         println("ViewModel initialized with userId: $userId")
         fetchChatRooms()
     }
-    fun fetchChatRooms(userId: String = this.userId) {
 
+    fun fetchChatRooms() {
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
@@ -58,15 +54,15 @@ class ChatRoomListViewModel @Inject constructor(
                     _error.value = "Failed to load chat rooms: ${e.message}"
                     _isLoading.value = false
                 }
-                .collect { rooms ->
-                    println("Received rooms: ${rooms.size} rooms")
+                .collectLatest { rooms ->
                     _chatRooms.value = rooms
                     _isLoading.value = false
                     println("Fetched rooms: $rooms")
                 }
         }
     }
-    suspend fun markAsRead(roomId: String, userId: String) {
+
+    suspend fun markAsRead(roomId: String) {
         try {
             repository.updateLastReadTimestamp(
                 roomId = roomId,
@@ -78,21 +74,31 @@ class ChatRoomListViewModel @Inject constructor(
         }
     }
 
-    fun onRoomClicked(roomId: String, userId: String, onNavigate: (String) -> Unit) {
+    fun onRoomClicked(roomId: String, otherUserId: String, onNavigate: (String) -> Unit) {
         viewModelScope.launch {
             try {
-                markAsRead(roomId, userId)
-                onNavigate(roomId)
+                markAsRead(roomId)
+                onNavigate("chat/$userId/$roomId/$otherUserId")
             } catch (e: Exception) {
                 _error.value = "Navigation failed: ${e.message}"
             }
         }
     }
 
-    // Other methods can use this.userId directly
     fun createChatRoom(otherUserId: String) {
         viewModelScope.launch {
-            repository.createChatRoom(this@ChatRoomListViewModel.userId, otherUserId)
+            _roomCreationState.value = RoomCreationState.Loading
+            try {
+                val result = repository.createChatRoom(userId, otherUserId)
+                if (result.isSuccess) {
+                    _roomCreationState.value = RoomCreationState.Success(result.getOrThrow())
+                    fetchChatRooms()
+                } else {
+                    _roomCreationState.value = RoomCreationState.Error(result.exceptionOrNull()?.message ?: "Failed to create room")
+                }
+            } catch (e: Exception) {
+                _roomCreationState.value = RoomCreationState.Error(e.message ?: "Failed to create room")
+            }
         }
     }
 
