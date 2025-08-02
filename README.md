@@ -252,7 +252,8 @@ Includes:
 ### Room Test in Logcat ![WhatsApp Image 2025-07-31 at 16 47 28_e7eee87a](https://github.com/user-attachments/assets/421431c8-f9a9-4316-a544-0506eda2ac9f)
 
 
-## 💬 QuickChat – Day 4: Chatroom List + Unread Count
+
+## 💬 QuickChat – Day 4: Chatroom List + Unread Count (Updated)
 
 ---
 
@@ -260,7 +261,6 @@ Includes:
 
 Today we implemented the **Chatroom List UI** showing:
  
-
 This enhances user experience by surfacing conversation context without opening each room.
 
 ---
@@ -273,6 +273,10 @@ This enhances user experience by surfacing conversation context without opening 
 | `ChatRoom` data model                 | ✅ Done |
 | Firebase Firestore room fetching      | ✅ Done |
 | Display avatar, name, last message    | ✅ Done |
+| Swipe to delete/archive               | ✅ Done |
+| Timestamp                             | ✅ Done |
+| Unread count calculation              | ✅ Done |
+| Real-time unread count updates        | ✅ Done |
 
 ---
 
@@ -285,15 +289,44 @@ data class ChatRoom(
     val lastTimestamp: Long,
     val unreadCount: Int
 )
-
 ```
 
 ---
 
 ### 🔄 Unread Count Logic
 
-- Each message has a `timestamp`.
-- Each user has a `lastReadTimestamp` per room.
+- Each user has their own `lastRead_<userId>` timestamp
+- Unread count calculated by counting messages after this timestamp
+- Badges update in real-time
+
+#### 🧩 Unread Count Calculation
+
+```kotlin
+fun calculateUnreadCount(
+    messages: List<Message>,
+    lastReadTimestamp: Long
+): Int {
+    return messages.count { it.timestamp > lastReadTimestamp }
+}
+```
+
+#### ✅ Marking Messages as Read
+
+```kotlin
+fun markMessagesAsRead(roomId: String, userId: String) {
+    val currentTimestamp = System.currentTimeMillis()
+    val firestore = FirebaseFirestore.getInstance()
+    firestore.collection("chatrooms")
+        .document(roomId)
+        .update("lastRead_$userId", currentTimestamp)
+}
+```
+
+> Call `markMessagesAsRead()` when the user opens the chat screen to reset unread count.
+
+#### 🧮 Unread Count Flow Diagram
+
+![Unread Count Diagram] (<img width="2790" height="1449" alt="deepseek_mermaid_20250802_7d28b7" src="https://github.com/user-attachments/assets/010e5f7d-f624-4b09-bc35-d597100a645d" />)
 
 ---
 
@@ -317,16 +350,9 @@ data class ChatRoom(
 
 ### 🚀 Stretch Features (To-do)
 
-| Feature                    | Status  |
-|---------------------------|---------|
-| Swipe to delete/archive   | ❌ Not yet |
-| Mute/unmute per room      | ❌ Not yet |
-| Pin chats to top          | ❌ Not yet |
-| Archive older chats       | ❌ Not yet |
-| Timestamp formatting (e.g., "2 min ago") | ❌ Not yet |
-| Unread count calculation              |  ❌ Not yet |
-| Real-time unread count updates        | ❌ Not yet|
-
+| Feature                    | Status     |
+|---------------------------|------------|
+| Mute/unmute per room UI States Problem | ❌ Not yet |
 
 ---
 
@@ -334,15 +360,18 @@ data class ChatRoom(
 
 ---
 
-### ✅ Day 4 Deliverables
+### ✅ Day 4-5 Deliverables
 
 - ✅ ChatRoom model created
 - ✅ Firebase fetch for current user's chatrooms
 - ✅ Last message + time displayed
 - ✅ Room navigation works with live data
-- [End of dat 4]
-  
+- ✅Calculated unread Count messages
+- ✅Swipe to delete/archive chatroom
+- ✅Mute/Unmute UI
 
+
+[End of Day 4 & 5]
 
 
 
