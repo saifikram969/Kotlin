@@ -1,10 +1,8 @@
 package com.example.quickchat.data.local
-
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 import com.example.quickchat.data.model.ChatRoom
 import kotlinx.coroutines.flow.Flow
 @Dao
@@ -17,6 +15,9 @@ interface ChatRoomDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(rooms: List<ChatRoom>)
+
+    @Query("UPDATE chat_rooms SET lastTimestamp = :timestamp WHERE roomId = :roomId")
+    suspend fun updateTimestamp(roomId: String, timestamp: Long)
 
     @Query("SELECT * FROM chat_rooms WHERE roomId = :roomId")
     suspend fun getRoomById(roomId: String): ChatRoom?

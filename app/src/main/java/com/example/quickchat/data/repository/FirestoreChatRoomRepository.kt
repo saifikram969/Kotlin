@@ -1,5 +1,4 @@
 package com.example.quickchat.data.repository
-
 import android.util.Log
 import com.example.quickchat.data.local.ChatRoomDao
 import com.example.quickchat.data.model.ChatRoom
@@ -12,8 +11,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
@@ -26,20 +23,32 @@ class FirestoreChatRoomRepository @Inject constructor(
     private val chatRoomDao: ChatRoomDao
 ) : ChatRoomRepository {
 
+
+
+
     override fun getChatRooms(userId: String): Flow<List<ChatRoom>> {
-        return combine(
-            getRemoteChatRooms(userId),
-            chatRoomDao.getChatRooms(userId).distinctUntilChanged()
-        ) { remoteRooms, localRooms ->
-            if (remoteRooms.isNotEmpty()) remoteRooms else localRooms
+        return callbackFlow {
+            // First try to get from local cache immediately
+            launch {
+                chatRoomDao.getChatRooms(userId).collect { localRooms ->
+                    val filteredLocal = localRooms.filter { !it.isArchived }
+                    if (filteredLocal.isNotEmpty()) {
+                        trySend(filteredLocal)
+                    }
+                }
+            }
+
+            // Then get from remote and update
+            getRemoteChatRooms(userId).collect { remoteRooms ->
+                val filteredRemote = remoteRooms.filter { !it.isArchived }
+                trySend(filteredRemote)
+            }
         }
     }
-
     private fun getRemoteChatRooms(userId: String): Flow<List<ChatRoom>> = callbackFlow {
         val listener = firestore.collection(CHATROOMS_COLLECTION)
             .whereArrayContains("participants", userId)
             .addSnapshotListener { snapshot, error ->
-
                 if (error != null || snapshot == null) {
                     Log.e(TAG, "Error listening to chat rooms", error)
                     trySend(emptyList())
@@ -49,7 +58,15 @@ class FirestoreChatRoomRepository @Inject constructor(
                 CoroutineScope(Dispatchers.IO).launch {
                     val rooms = snapshot.documents.mapNotNull { doc ->
                         try {
-                            createChatRoomFromDocument(doc, userId)
+                            val data = doc.data ?: emptyMap()
+                            val participants = data["participants"] as? List<String> ?: emptyList()
+
+                            // Ensure the current user is actually in participants
+                            if (participants.contains(userId)) {
+                                createChatRoomFromDocument(doc, userId)
+                            } else {
+                                null
+                            }
                         } catch (e: Exception) {
                             Log.e(TAG, "Error parsing chat room document", e)
                             null
@@ -68,6 +85,8 @@ class FirestoreChatRoomRepository @Inject constructor(
 
         awaitClose { (listener as ListenerRegistration).remove() }
     }
+
+
 
     private suspend fun createChatRoomFromDocument(
         doc: DocumentSnapshot,
@@ -188,4 +207,136 @@ class FirestoreChatRoomRepository @Inject constructor(
             0L
         }
     }
+    // ChatRoomRepository.kt
+    interface ChatRoomRepository {
+        // ... existing methods ...
+        suspend fun archiveRoom(roomId: String, archive: Boolean) // Add this
+    }
+    // FirestoreChatRoomRepository.kt
+    override suspend fun archiveRoom(roomId: String, archive: Boolean) {
+        try {
+            // Update Firestore
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .update(mapOf(
+                    "isArchived" to archive,
+                    "lastUpdated" to FieldValue.serverTimestamp()
+                ))
+                .await()
+
+            // Update local cache
+            chatRoomDao.getRoomById(roomId)?.let { room ->
+                chatRoomDao.insertAll(listOf(room.copy(isArchived = archive)))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error archiving room", e)
+            throw e
+        }
+    }
+
+    // In FirestoreChatRoomRepository
+    override suspend fun deleteRoom(roomId: String) {
+        try {
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .update(mapOf(
+                    "isDeleted" to true,
+                    "lastUpdated" to FieldValue.serverTimestamp()
+                ))
+                .await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting room", e)
+            throw e
+        }
+    }
+
+
+    override suspend fun restoreRoom(roomId: String) {
+        try {
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .update(mapOf(
+                    "isDeleted" to false,
+                    "lastUpdated" to FieldValue.serverTimestamp()
+                ))
+                .await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error restoring room", e)
+            throw e
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+    // In FirestoreChatRoomRepository
+    override suspend fun toggleMuteStatus(roomId: String, mute: Boolean) {
+        try {
+            Log.d("MuteButtonRepo", "Updating mute status for $roomId to $mute")
+
+            // Atomic operation to update mute status
+            firestore.runTransaction { transaction ->
+                val docRef = firestore.collection(CHATROOMS_COLLECTION).document(roomId)
+                transaction.update(docRef, "isMuted", mute)
+                transaction.update(docRef, "lastUpdated", FieldValue.serverTimestamp())
+            }.await()
+
+            // Update local cache
+            chatRoomDao.getRoomById(roomId)?.let { room ->
+                chatRoomDao.insertAll(listOf(room.copy(isMuted = mute)))
+            }
+        } catch (e: Exception) {
+            Log.e("MuteButtonRepo", "Error updating mute status", e)
+            throw e
+        }
+         fun getRemoteChatRooms(userId: String): Flow<List<ChatRoom>> = callbackFlow {
+            val listener = firestore.collection(CHATROOMS_COLLECTION)
+                .whereArrayContains("participants", userId)
+                .addSnapshotListener { snapshot, error ->
+
+                    if (error != null || snapshot == null) {
+                        Log.e(TAG, "Error listening to chat rooms", error)
+                        trySend(emptyList())
+                        return@addSnapshotListener
+                    }
+
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val rooms = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                createChatRoomFromDocument(doc, userId)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error parsing chat room document", e)
+                                null
+                            }
+                        }.filter {
+                            // Only show non-archived rooms or rooms where isArchived field doesn't exist
+                            it.isArchived != true
+                        }
+
+                        try {
+                            // Update local cache with all rooms including archived ones
+                            chatRoomDao.insertAll(rooms)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error updating local cache", e)
+                        }
+
+                        trySend(rooms)
+                    }
+                }
+
+            awaitClose { (listener as ListenerRegistration).remove() }
+        }
+
+
+
+    }
+
+
 }

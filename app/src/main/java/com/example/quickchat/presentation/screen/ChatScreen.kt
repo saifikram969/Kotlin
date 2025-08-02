@@ -1,5 +1,4 @@
-package com.example.quickchat.presentation.screen
-
+package com.example.quickchat.presentation.scree
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut

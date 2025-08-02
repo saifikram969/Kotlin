@@ -14,6 +14,7 @@ import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
@@ -63,7 +64,8 @@ class ChatRepository @Inject constructor(
                                     unreadCount = 0, // Will be calculated separately
                                     userId = userId,
                                     participants = participants,
-                                    lastRead = lastRead
+                                    lastRead = lastRead,
+                                    isMuted = data["isMuted"] as? Boolean ?: false
                                 )
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error parsing chat room", e)
@@ -219,6 +221,7 @@ class ChatRepository @Inject constructor(
         awaitClose { listener.remove() }
     }
 
+
     // Local Cache Operations
     fun getCachedMessages(roomId: String): Flow<List<ChatMessage>> {
         return chatMessageDao.getMessagesByRoom(roomId).map { entities ->
@@ -288,4 +291,27 @@ class ChatRepository @Inject constructor(
             "isSystemMessage" to isSystemMessage
         )
     }
+
+    // Add this to ChatRepository.kt
+    class ChatRepository @Inject constructor(
+        private val database: FirebaseFirestore,
+        private val chatMessageDao: ChatMessageDao
+    ) {
+
+        suspend fun toggleMuteStatus(roomId: String, mute: Boolean) {
+            try {
+                database.collection(CHATROOMS_COLLECTION)
+                    .document(roomId)
+                    .update("isMuted", mute)
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error toggling mute status", e)
+                throw e
+            }
+        }
+    }
+
+
+
 }
+

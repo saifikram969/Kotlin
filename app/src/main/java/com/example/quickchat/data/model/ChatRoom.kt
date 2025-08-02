@@ -14,17 +14,33 @@ data class ChatRoom(
     val unreadCount: Int,
     val userId: String,  // To associate rooms with users
     val participants: List<String> = emptyList(),
-    val lastRead: Long = 0L // For tracking read status
+    val lastRead: Long = 0L, // For tracking read status
+    val isArchived: Boolean = false,
+    val isDeleted: Boolean = false,
+    val isMuted: Boolean = false,
+    val isProcessingMute: Boolean = false,
+    val pendingMuteState: Boolean? = null
+
 
 
 ){
 // Helper function to convert to Firestore map
 fun toFirestoreMap(): Map<String, Any> {
-    return mapOf(
+    val map = mutableMapOf<String, Any>(
         "name" to name,
         "lastMessage" to (lastMessage ?: ""),
         "lastTimestamp" to lastTimestamp,
         "participants" to participants,
-        "lastRead_${userId}" to lastRead
+        "isArchived" to isArchived,
+        "isMuted" to isMuted
     )
-}}
+
+    // Add lastRead fields for all participants
+    participants.forEach { userId ->
+        map["lastRead_$userId"] = lastRead
+    }
+
+    return map
+}
+
+}

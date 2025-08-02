@@ -7,8 +7,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.*
 import androidx.navigation.compose.*
-import com.example.quickchat.presentation.screen.ChatRoomListScreen
-import com.example.quickchat.presentation.screen.ChatScreen
+import com.example.quickchat.presentation.ChatRoomListScreen.ChatRoomListScreen
+import com.example.quickchat.presentation.scree.ChatScreen
 
 @Composable
 fun ChatAppNavHost(
