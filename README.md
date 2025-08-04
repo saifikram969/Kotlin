@@ -277,6 +277,7 @@ This enhances user experience by surfacing conversation context without opening 
 | Timestamp                             | ✅ Done |
 | Unread count calculation              | ✅ Done |
 | Real-time unread count updates        | ✅ Done |
+| Mute/unmute per room UI States Problem| ✅ Done |
 
 ---
 
@@ -346,15 +347,6 @@ fun markMessagesAsRead(roomId: String, userId: String) {
 - **Time**: human-readable (e.g., "5 mins ago")
 - **Unread count**: visible as a badge (hidden if zero).
 
----
-
-### 🚀 Stretch Features (To-do)
-
-| Feature                    | Status     |
-|---------------------------|------------|
-| Mute/unmute per room UI States Problem | ❌ Not yet |
-
----
 
 - Tap on any chatroom to navigate to the full chat screen.
 
@@ -372,6 +364,74 @@ fun markMessagesAsRead(roomId: String, userId: String) {
 
 
 [End of Day 4 & 5]
+
+# 💬 QuickChat – Day 6: Image Messaging Feature 
+
+## 🎯 Goal
+Send image messages and handle upload progress in a chat application.
+
+## ✅ Required Tasks
+- [x] Use `ActivityResult` to select image from device.
+- [x] Upload to Cloudinary: `/chatrooms/{roomId}/images/{messageId}.jpg`
+- [x] Display upload progress indicator while uploading.
+- [x] Send image message with `imageUrl` once upload completes.
+- [x] Display image messages inside chat UI.
+
+## 🚀 Stretch Tasks (Optional)
+- [x] Image compression before upload.
+- [x] Thumbnail support (for preview and faster loading).
+- [x] Enforce file size limit (e.g., 5MB max).
+
+## 🧩 Data Model
+
+```
+data class ChatMessage(
+    val id: String,
+    val text: String? = null,
+    val imageUrl: String? = null,
+    val senderId: String,
+    val timestamp: Long,
+    val messageType: MessageType
+)
+
+enum class MessageType {
+    TEXT, IMAGE
+}
+```
+
+## ☁️ Upload Strategy
+- Upload selected image to **Cloudinary** using a preset and API key.
+- Once uploaded, get the `secure_url` of the image.
+- Send a message with `messageType = IMAGE` and `imageUrl = secure_url`.
+
+  ## 🧩 Image Message Schema (Data Structure
+```
+{
+  "id": "msg_123",
+  "senderId": "user_456",
+  "roomId": "room_789",
+  "type": "image",
+  "imageUrl": "https://res.cloudinary.com/your-cloud/image/upload/v1690000000/chat_images/image123.jpg",
+  "timestamp": 1690000000000,
+  "uploadProgress": 100
+}
+```
+
+
+## ✅ Day 6 Deliverables
+- ✅ Image selection from device
+- ✅ Upload progress
+- ✅ mage displayed in chat UI
+- ✅ Image compression
+- ✅ Thumbnail support
+- ✅ Validarion only 5mb files send
+
+
+
+
+---
+
+✅ [End of Day 6] 
 
 
 
