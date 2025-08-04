@@ -7,17 +7,23 @@ import com.example.quickchat.data.local.toEntity
 import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.ChatRoom
 import com.example.quickchat.data.model.MessageStatus
+import com.example.quickchat.data.model.MessageType
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 import javax.inject.Inject
@@ -34,6 +40,48 @@ class ChatRepository @Inject constructor(
             .setPersistenceEnabled(true)
             .build()
     }
+
+    /* FCM */
+
+    suspend fun registerFcmToken(userId: String) {
+        try {
+            val token = FirebaseMessaging.getInstance().token.await()
+            database.collection("users")
+                .document(userId)
+                .update("fcmToken", token)
+                .await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error registering FCM token", e)
+        }
+    }
+
+    suspend fun sendNotification(
+        roomId: String,
+        senderId: String,
+        messageText: String,
+        recipientId: String
+    ) {
+        try {
+            val recipientData = database.collection("users")
+                .document(recipientId)
+                .get()
+                .await()
+                .data ?: return
+
+            val fcmToken = recipientData["fcmToken"] as? String ?: return
+
+            // In a real app, you would send this to your server
+            // or use Firebase Cloud Functions to send the notification
+            // This is just a placeholder
+            Log.d(TAG, "Would send FCM to $fcmToken for message: $messageText")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending notification", e)
+        }
+    }
+
+
+
+
 
     // Chat Room Operations
     fun getChatRoomsForUser(userId: String): Flow<List<ChatRoom>> = callbackFlow {
@@ -80,26 +128,27 @@ class ChatRepository @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    suspend fun getUnreadCountsForUser(userId: String): Map<String, Int> {
+    suspend fun getUnreadCountForRoom(roomId: String, userId: String): Int {
         return try {
-            val rooms = database.collection(CHATROOMS_COLLECTION)
-                .whereArrayContains("participants", userId)
+            val lastRead = database.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
                 .get()
                 .await()
-                .documents
+                .getLong("lastRead_$userId") ?: 0L
 
-            rooms.associate { doc ->
-                val roomId = doc.id
-                val lastRead = doc.getLong("lastRead_$userId") ?: 0L
-                val count = getUnreadCountForRoom(roomId, lastRead)
-                roomId to count
-            }
+            val query = database.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("messages")
+                .whereGreaterThan("timestamp", lastRead)
+                .get()
+                .await()
+
+            query.size()
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting unread counts", e)
-            emptyMap()
+            Log.e(TAG, "Error getting unread count", e)
+            0
         }
     }
-
     private suspend fun getUnreadCountForRoom(roomId: String, lastRead: Long): Int {
         return try {
             val query = database.collection(CHATROOMS_COLLECTION)
@@ -160,7 +209,10 @@ class ChatRepository @Inject constructor(
     // Message Operations
     suspend fun sendMessage(roomId: String, message: ChatMessage): Result<Unit> {
         return try {
-            // First send the message
+            // First cache the message locally
+            cacheMessage(roomId, message)
+
+            // Then send to Firestore
             database.collection(CHATROOMS_COLLECTION)
                 .document(roomId)
                 .collection("messages")
@@ -168,7 +220,7 @@ class ChatRepository @Inject constructor(
                 .set(message.toFirestoreMap())
                 .await()
 
-            // Then update the chatroom's last message
+            // Update chatroom's last message
             val updateData = mapOf<String, Any>(
                 "lastMessage" to message.text,
                 "lastTimestamp" to message.timestamp,
@@ -204,13 +256,37 @@ class ChatRepository @Inject constructor(
                     else -> {
                         val messages = snapshot.documents.mapNotNull { doc ->
                             try {
-                                doc.toObject(ChatMessage::class.java)?.copy(
-                                    status = MessageStatus.valueOf(doc.getString("status") ?: "SENT"),
-                                    timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                                val data = doc.data ?: emptyMap()
+                                ChatMessage(
+                                    id = doc.id,
+                                    text = data["text"] as? String ?: "",
+                                    senderId = data["senderId"] as? String ?: "",
+                                    imageUrl = data["imageUrl"] as? String,
+                                    messageType = MessageType.valueOf(
+                                        data["messageType"] as? String ?: "TEXT"
+                                    ),
+                                    timestamp = data["timestamp"] as? Long ?: System.currentTimeMillis(),
+                                    isSystemMessage = data["isSystemMessage"] as? Boolean ?: false,
+                                    clientGeneratedId = data["clientGeneratedId"] as? String ?: "",
+                                    isRead = data["isRead"] as? Boolean ?: false,
+                                    status = MessageStatus.valueOf(
+                                        data["status"] as? String ?: "SENDING"
+                                    )
                                 )
                             } catch (e: Exception) {
-                                Log.e(TAG, "Error parsing message", e)
+                                Log.e(TAG, "Error parsing message ${doc.id}", e)
                                 null
+                            }
+                        }
+                        // Cache received messages using repositoryScope
+                        // Launch caching in IO dispatcher
+                        CoroutineScope(Dispatchers.IO).launch {
+                            messages.forEach {
+                                try {
+                                    cacheMessage(roomId, it)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error caching received message", e)
+                                }
                             }
                         }
                         trySend(messages)
@@ -221,14 +297,8 @@ class ChatRepository @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-
     // Local Cache Operations
-    fun getCachedMessages(roomId: String): Flow<List<ChatMessage>> {
-        return chatMessageDao.getMessagesByRoom(roomId).map { entities ->
-            entities.map { it.toChatMessage() }
-        }
-    }
-
+    // Local Cache Operations - Updated functions
     suspend fun cacheMessage(roomId: String, message: ChatMessage) {
         try {
             chatMessageDao.insertMessage(message.toEntity(roomId))
@@ -236,6 +306,8 @@ class ChatRepository @Inject constructor(
             Log.e(TAG, "Error caching message", e)
         }
     }
+
+
 
     suspend fun updateMessageStatus(messageId: String, status: MessageStatus) {
         try {
@@ -297,6 +369,7 @@ class ChatRepository @Inject constructor(
         private val database: FirebaseFirestore,
         private val chatMessageDao: ChatMessageDao
     ) {
+        // ... other existing code ...
 
         suspend fun toggleMuteStatus(roomId: String, mute: Boolean) {
             try {
@@ -312,6 +385,16 @@ class ChatRepository @Inject constructor(
     }
 
 
-
+    suspend fun debugCache(roomId: String) {
+        try {
+            val cached = chatMessageDao.getMessagesByRoom(roomId).first()
+            Log.d(TAG, "Cached messages count: ${cached.size}")
+            cached.forEach {
+                Log.d(TAG, "Cached message: $it")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error debugging cache", e)
+        }
+    }
 }
 

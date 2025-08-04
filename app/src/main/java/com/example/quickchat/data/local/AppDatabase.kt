@@ -11,7 +11,7 @@ import com.example.quickchat.data.model.ChatRoom
 
 @Database(
     entities = [ChatMessageEntity::class, ChatRoom::class], // Include both entities
-    version = 12, // Increment version since we're changing schema
+    version = 13, // Increment version since we're changing schema
     exportSchema = true
 )
 @TypeConverters(Converters::class) // Add this for List<String> conversion
@@ -162,7 +162,14 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE new_chat_rooms RENAME TO chat_rooms")
             }
         }
-
-
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE chat_messages ADD COLUMN messageType TEXT NOT NULL DEFAULT 'TEXT'")
+                database.execSQL("ALTER TABLE chat_messages ADD COLUMN imageUrl TEXT")
+            }
         }
+
+
+
+    }
 }

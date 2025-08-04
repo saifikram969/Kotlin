@@ -2,6 +2,7 @@ package com.example.quickchat.data.local
 
 import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.MessageStatus
+import com.example.quickchat.data.model.MessageType
 
 fun ChatMessage.toEntity(roomId: String): ChatMessageEntity {
     return ChatMessageEntity(
@@ -12,7 +13,9 @@ fun ChatMessage.toEntity(roomId: String): ChatMessageEntity {
         status = status.name,
         isSystemMessage = isSystemMessage,
         clientGeneratedId = clientGeneratedId,
-        roomId = roomId
+        roomId = roomId,
+        messageType = messageType.name,
+        imageUrl = imageUrl
     )
 }
 
@@ -24,6 +27,8 @@ fun ChatMessageEntity.toChatMessage(): ChatMessage {
         timestamp = timestamp,
         isSystemMessage = isSystemMessage,
         clientGeneratedId = clientGeneratedId,
-        status = MessageStatus.valueOf(status)
+        status = MessageStatus.valueOf(status),
+        messageType = MessageType.valueOf(messageType),
+        imageUrl = imageUrl
     )
 }
