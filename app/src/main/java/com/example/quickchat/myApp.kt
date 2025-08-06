@@ -4,9 +4,12 @@ import android.app.Application
 import android.content.ContentValues.TAG
 import android.util.Log
 import com.cloudinary.android.MediaManager
+import com.example.quickchat.data.repository.PresenceRepository
 import com.example.quickchat.di.appModule
 import com.google.firebase.FirebaseApp
+import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
+import org.koin.compose.getKoin
 import org.koin.core.context.startKoin
 
 class myApp : Application() {
@@ -23,6 +26,8 @@ class myApp : Application() {
         } catch (e: Exception) {
             Log.e("FirebaseInit", "Firebase initialization exception: ${e.message}")
         }
+
+
 
         // Initialize Koin
         try {
@@ -46,5 +51,16 @@ class myApp : Application() {
         } catch (e: Exception) {
             Log.e("CloudinaryInit", "Cloudinary initialization failed: ${e.message}")
         }
+
+        // Initialize Presence Tracking
+        // Initialize Presence Tracking
+        try {
+            val presenceRepository = get<PresenceRepository>()
+            presenceRepository.registerActivityLifecycleCallbacks(this)
+            Log.d("PresenceInit", "Presence tracking initialized successfully.")
+        } catch (e: Exception) {
+            Log.e("PresenceInit", "Presence tracking initialization failed: ${e.message}")
+        }
     }
 }
+

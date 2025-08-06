@@ -22,7 +22,7 @@ private const val CHATROOMS_COLLECTION = "chatrooms"
 class ChatViewModel(
     private val repository: ChatRepository,
     private val chatRoomRepository: ChatRoomRepository,
-    private val presenceRepository: PresenceRepository
+    private val presenceRepository: PresenceRepository,
 ) : ViewModel() {
 
     private val _uploadResult = MutableStateFlow<CloudinaryUploadResponse?>(null)
@@ -47,6 +47,11 @@ class ChatViewModel(
     private var currentUserId: String? = null
     private var otherUserId: String? = null
 
+    // Typing status tracking
+    private val _isTyping = MutableStateFlow(false)
+    private val _otherUserTyping = MutableStateFlow<Boolean>(false)
+    val otherUserTyping: StateFlow<Boolean> = _otherUserTyping
+
     init {
         Log.d("VM_LIFECYCLE", "ViewModel INITIALIZED - Hash: ${hashCode()}")
     }
@@ -58,6 +63,9 @@ class ChatViewModel(
     override fun onCleared() {
         currentUserId?.let { userId ->
             updatePresence(userId, false)
+            currentRoomId?.let { roomId ->
+                updateTypingStatus(roomId, userId, false)
+            }
         }
         super.onCleared()
     }
@@ -133,6 +141,11 @@ class ChatViewModel(
                 // Update our own presence
                 updatePresence(currentUserId, true)
 
+                // Start observing typing status
+                otherUserId?.let { userId ->
+                    observeTypingStatus(roomId, userId)
+                }
+
                 // Combine cached and remote messages
                 repository.listenToMessages(roomId)
                     .catch { e ->
@@ -145,7 +158,7 @@ class ChatViewModel(
                             messages = sortedMessages,
                             currentUserId = currentUserId,
                             roomId = roomId,
-                            typingUserId = typingUserId.value
+                            typingUserId = if (_otherUserTyping.value) otherUserId else null
                         )
                     }
             } catch (e: Exception) {
@@ -164,6 +177,10 @@ class ChatViewModel(
     ) {
         viewModelScope.launch {
             try {
+                // Ensure typing status is set to false when sending message
+                updateTypingStatus(roomId, senderId, false)
+                _isTyping.value = false
+
                 val messageType = when {
                     !imageUrl.isNullOrEmpty() -> MessageType.IMAGE
                     else -> MessageType.TEXT
@@ -191,9 +208,6 @@ class ChatViewModel(
         }
     }
 
-    private val _otherUserTyping = MutableStateFlow<String?>(null)
-    val otherUserTyping: StateFlow<String?> = _otherUserTyping
-
     private fun createMessage(
         senderId: String,
         text: String,
@@ -212,18 +226,21 @@ class ChatViewModel(
         )
     }
 
-    fun observeTypingStatus(roomId: String, currentUserId: String) {
+    fun observeTypingStatus(roomId: String, userId: String) {
         Firebase.firestore.collection(CHATROOMS_COLLECTION)
             .document(roomId)
             .collection("typingStatus")
+            .document(userId)
             .addSnapshotListener { snapshot, _ ->
-                snapshot?.documents?.forEach { doc ->
-                    val userId = doc.id
-                    val isTyping = doc.getBoolean("isTyping") ?: false
-                    if (userId != currentUserId && isTyping) {
-                        _otherUserTyping.value = "$userId is typing..."
-                    } else if (userId != currentUserId) {
-                        _otherUserTyping.value = null
+                val isTyping = snapshot?.getBoolean("isTyping") ?: false
+                _otherUserTyping.value = isTyping
+
+                // Update UI state with typing information
+                _uiState.update { currentState ->
+                    if (currentState is ChatUiState.Success) {
+                        currentState.copy(typingUserId = if (isTyping) userId else null)
+                    } else {
+                        currentState
                     }
                 }
             }
@@ -278,21 +295,14 @@ class ChatViewModel(
         }
     }
 
-    fun setTypingTemporarily(userId: String) {
-        _typingUserId.value = userId
-        viewModelScope.launch {
-            delay(3000)
-            if (_typingUserId.value == userId) {
-                _typingUserId.value = null
+    fun setTypingStatus(isTyping: Boolean) {
+        currentRoomId?.let { roomId ->
+            currentUserId?.let { userId ->
+                viewModelScope.launch {
+                    updateTypingStatus(roomId, userId, isTyping)
+                    _isTyping.value = isTyping
+                }
             }
-        }
-    }
-
-    fun onNetworkRestored(roomId: String) {
-        viewModelScope.launch {
-            repository.syncMessageGaps(roomId)
-            val failedMessages = repository.getFailedMessages(roomId)
-            failedMessages.forEach { retryMessage(roomId, it) }
         }
     }
 
@@ -309,6 +319,19 @@ class ChatViewModel(
         )
 
         typingRef.set(data)
+    }
+    fun enterChatRoom(userId: String) {
+        viewModelScope.launch {
+            presenceRepository.updateUserPresence(userId, true)
+        }
+    }
+
+    fun onNetworkRestored(roomId: String) {
+        viewModelScope.launch {
+            repository.syncMessageGaps(roomId)
+            val failedMessages = repository.getFailedMessages(roomId)
+            failedMessages.forEach { retryMessage(roomId, it) }
+        }
     }
 }
 

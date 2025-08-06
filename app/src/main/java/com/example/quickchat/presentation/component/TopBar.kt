@@ -25,15 +25,81 @@ fun ChatTopBar(
     chatRoomName: String,
     participantName: String,
     isOnline: Boolean,
+    isTyping: Boolean,
     onBackClick: () -> Unit,
     onMoreOptionsClick: () -> Unit
 ) {
-    var showJoinedText by remember { mutableStateOf(true) }
+    var showStatusText by remember { mutableStateOf(false) }
+    var statusText by remember { mutableStateOf("") }
+    var statusColor by remember { mutableStateOf(Color(0xFF81C784)) }
 
-    // Auto-hide after 5 seconds (you can change this duration)
+    // For animated typing dots
+    val dotCount = 3
+    val dotAnimationDuration = 500
+    val dotDelays = listOf(0, 150, 300)
+    val dotAlphas = remember { List(dotCount) { mutableStateOf(0.3f) } }
+
+    // Track previous online state to detect changes
+    var previousOnlineState by remember { mutableStateOf(isOnline) }
+    var previousTypingState by remember { mutableStateOf(isTyping) }
+
+    // Animate typing dots
+    LaunchedEffect(isTyping) {
+        if (isTyping) {
+            while (true) {
+                dotDelays.forEachIndexed { index, delayMs ->
+                    delay(delayMs.toLong())
+                    dotAlphas[index].value = 1f
+                    delay((dotAnimationDuration - delayMs).toLong())
+                    dotAlphas[index].value = 0.3f
+                }
+                if (!isTyping) break
+                delay(500) // Pause between animation cycles
+            }
+        }
+    }
+
+    // Handle status changes
+    LaunchedEffect(isOnline, isTyping) {
+        when {
+            // User went online/offline
+            isOnline != previousOnlineState -> {
+                statusText = if (isOnline)
+                    "$participantName joined the chat room • Online"
+                else
+                    "$participantName went offline • Offline"
+                statusColor = if (isOnline) Color(0xFF81C784) else Color(0xFF9E9E9E)
+                showStatusText = true
+                previousOnlineState = isOnline
+            }
+            // User started/stopped typing
+            isTyping != previousTypingState -> {
+                statusText = if (isTyping)
+                    "$participantName is typing"
+                else
+                    "" // Don't show anything when typing stops
+                statusColor = Color(0xFF81C784)
+                showStatusText = isTyping
+                previousTypingState = isTyping
+            }
+        }
+
+        // Auto-hide after 5 seconds (except for typing which hides immediately when stops)
+        if (showStatusText && !isTyping) {
+            delay(5000)
+            showStatusText = false
+        }
+    }
+
+    // Show initial joined message only once
     LaunchedEffect(Unit) {
-        delay(5000)
-        showJoinedText = false
+        if (isOnline) {
+            statusText = "$participantName joined the chat room • Online"
+            statusColor = Color(0xFF81C784)
+            showStatusText = true
+            delay(5000)
+            showStatusText = false
+        }
     }
 
     TopAppBar(
@@ -66,7 +132,7 @@ fun ChatTopBar(
                 }
 
                 AnimatedVisibility(
-                    visible = showJoinedText,
+                    visible = showStatusText,
                     enter = slideInHorizontally(
                         initialOffsetX = { fullWidth -> fullWidth },
                         animationSpec = tween(600)
@@ -80,19 +146,29 @@ fun ChatTopBar(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "$participantName joined the chat room",
+                            text = statusText,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
-                            color = Color(0xFF81C784), // Light green color
+                            color = statusColor,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (isOnline) "• Online" else "• Offline",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isOnline) Color(0xFF81C784) else Color(0xFF9E9E9E),
-                            maxLines = 1
-                        )
+
+                        if (isTyping) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Row {
+                                repeat(dotCount) { index ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .background(
+                                                color = statusColor.copy(alpha = dotAlphas[index].value),
+                                                shape = MaterialTheme.shapes.small
+                                            )
+                                            .padding(end = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -118,7 +194,7 @@ fun ChatTopBar(
 
 @Preview(showBackground = true)
 @Composable
-fun PreviewChatTopBar() {
+fun PreviewChatTopBarTyping() {
     MaterialTheme {
         Scaffold(
             topBar = {
@@ -126,6 +202,7 @@ fun PreviewChatTopBar() {
                     chatRoomName = "QuickChat Room",
                     participantName = "Akbar",
                     isOnline = true,
+                    isTyping = true,
                     onBackClick = {},
                     onMoreOptionsClick = {}
                 )
@@ -148,6 +225,7 @@ fun PreviewChatTopBarOffline() {
                     chatRoomName = "QuickChat Room",
                     participantName = "Akbar",
                     isOnline = false,
+                    isTyping = false,
                     onBackClick = {},
                     onMoreOptionsClick = {}
                 )

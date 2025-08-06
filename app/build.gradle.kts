@@ -84,6 +84,9 @@ dependencies {
     //cloudinary
     implementation("com.cloudinary:cloudinary-android:3.1.1")
 
+    //other
+    implementation("androidx.lifecycle:lifecycle-process:2.9.2")
+
 
     // Room Database
     implementation("androidx.room:room-runtime:2.7.2")
