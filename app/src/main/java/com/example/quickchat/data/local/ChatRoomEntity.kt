@@ -14,7 +14,8 @@ data class ChatRoomEntity(
     val lastTimestamp: Long,
     val unreadCount: Int,
     val userId: String,
-    val lastRead: Long
+    val lastRead: Long,
+    val fcmTokens: String = "{}"
 ) {
     fun toChatRoom(participants: List<String>): ChatRoom {
         return ChatRoom(
@@ -25,7 +26,9 @@ data class ChatRoomEntity(
             unreadCount = unreadCount,
             userId = userId,
             participants = participants,
-            lastRead = lastRead
+            lastRead = lastRead,
+            fcmTokens = Converters().jsonToStringMap(fcmTokens)
+
         )
     }
 }

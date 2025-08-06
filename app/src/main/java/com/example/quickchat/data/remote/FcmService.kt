@@ -1,6 +1,6 @@
 package com.example.quickchat.data.remote
 
-import android.app.ActivityManager
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -11,163 +11,145 @@ import androidx.core.app.NotificationCompat
 import com.example.quickchat.MainActivity
 import com.example.quickchat.R
 import com.example.quickchat.data.repository.ChatRepository
-import com.google.firebase.messaging.FirebaseMessaging
+import com.example.quickchat.utils.DeviceIdHelper
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
-import java.util.*
 
 class FcmService : FirebaseMessagingService() {
 
-    private val chatRepository: ChatRepository by inject()
+    private val repository: ChatRepository by inject()
+    private val notificationManager by lazy {
+        getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    }
 
     override fun onNewToken(token: String) {
-        super.onNewToken(token)
-        Log.d("FCM_TOKEN", "New token: $token")
-        // You can implement token refresh logic here if needed
-    }
-    private fun logCurrentToken() {
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                Log.d("FCM_DEBUG", "Manual token: ${task.result}")
-            } else {
-                Log.e("FCM_DEBUG", "Token failed", task.exception)
+        Log.d(TAG, "New FCM token received")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val deviceId = DeviceIdHelper.getDeviceId(this@FcmService)
+                if (repository.storeFcmToken(deviceId, token)) {
+                    Log.d(TAG, "Token stored successfully")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Token storage failed", e)
             }
         }
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
-        remoteMessage.data.let { data ->
-            when (data["type"]) {
-                "chat_message" -> {
-                    val roomId = data["roomId"] ?: return
-                    val senderId = data["senderId"] ?: return
-                    val senderName = data["senderName"] ?: "Someone"
-                    val messagePreview = data["messagePreview"] ?: "New message"
+        Log.d("sender_id", "Sender ID: ${remoteMessage.senderId}") // यहाँ sender ID print करें
+        Log.d(TAG, "From: ${remoteMessage.from}")
+        Log.d(TAG, "Data: ${remoteMessage.data}")
 
-                    if (isAppInForeground()) {
-                        // If app is in foreground, just update the last read timestamp
-                        CoroutineScope(Dispatchers.IO).launch {
-                            // Get current user ID from shared preferences or other storage
-                            val currentUserId = getCurrentUserId()
-                            chatRepository.updateLastReadTimestamp(
-                                roomId = roomId,
-                                userId = currentUserId,
-                                timestamp = System.currentTimeMillis()
-                            )
-                        }
-                    } else {
-                        // If app is in background, show notification
-                        showNotification(
-                            roomId = roomId,
-                            senderName = senderName,
-                            messagePreview = messagePreview,
-                            senderId = senderId
-                        )
-                    }
-                }
-                // Add other notification types if needed
-            }
+        // Always handle data payload first
+        if (remoteMessage.data.isNotEmpty()) {
+            Log.d(TAG, "Message data payload: ${remoteMessage.data}")
+            handleDataMessage(remoteMessage.data)
         }
-    }
 
-    private fun isAppInForeground(): Boolean {
-        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val processes = activityManager.runningAppProcesses ?: return false
-            for (process in processes) {
-                if (process.processName == packageName) {
-                    return process.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
-                }
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            val appProcessInfo = ActivityManager.RunningAppProcessInfo()
-            @Suppress("DEPRECATION")
-            ActivityManager.getMyMemoryState(appProcessInfo)
-            return appProcessInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
-        }
-        return false
-    }
-
-    private fun getCurrentUserId(): String {
-        // Implement your logic to get current user ID
-        // This could be from SharedPreferences, Firebase Auth, etc.
-        // For example:
-        val sharedPref = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        return sharedPref.getString("current_user_id", "") ?: ""
-    }
-
-    private fun handleChatMessageNotification(roomId: String, senderId: String, messagePreview: String) {
-        CoroutineScope(Dispatchers.IO).launch {
-            // Mark as read if app is in foreground
-            if (isAppInForeground()) {
-                chatRepository.updateLastReadTimestamp(roomId, senderId, System.currentTimeMillis())
-                return@launch
-            }
-
-            // Create notification
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-            // Create deep link intent
-            val intent = Intent(this@FcmService, MainActivity::class.java).apply {
-                putExtra("roomId", roomId)
-                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-
-            val pendingIntent = PendingIntent.getActivity(
-                this@FcmService,
-                Random().nextInt(),
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        // Then check for notification payload
+        remoteMessage.notification?.let {
+            Log.d(TAG, "Message Notification Body: ${it.body}")
+            showNotification(
+                title = it.title ?: "New message",
+                message = it.body ?: "",
+                data = remoteMessage.data
             )
-
-            val notification = NotificationCompat.Builder(this@FcmService, "chat_messages")
-                .setContentTitle("New message from $senderId")
-                .setContentText(messagePreview)
-                .setSmallIcon(R.drawable.notifications_24)
-                .setContentIntent(pendingIntent)
-                .setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .build()
-
-            notificationManager.notify(roomId.hashCode(), notification)
         }
     }
-}
 
-private fun FcmService.showNotification(
-    roomId: String,
-    senderName: String,
-    messagePreview: String,
-    senderId: String
-) {
-    // Create deep link intent
-    val intent = Intent(this, MainActivity::class.java).apply {
-        putExtra("deep_link_room_id", roomId)
-        putExtra("deep_link_sender_id", senderId)
-        flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+    private fun handleDataMessage(data: Map<String, String>) {
+        when (data["type"]) {
+            "chat_message" -> showChatNotification(data)
+            else -> showGenericNotification(
+                title = data["title"] ?: "New message",
+                message = data["message"] ?: "You have a new notification",
+                data = data
+            )
+        }
     }
 
-    val pendingIntent = PendingIntent.getActivity(
-        this,
-        roomId.hashCode(), // Unique request code
-        intent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
+    private fun showChatNotification(data: Map<String, String>) {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("deep_link_action", "open_chat")
+            data["roomId"]?.let { putExtra("room_id", it) }
+            data["senderId"]?.let { putExtra("sender_id", it) }
+        }
 
-    val notification = NotificationCompat.Builder(this, "chat_messages")
-        .setContentTitle("$senderName: $messagePreview")
-        .setContentText(messagePreview)
-        .setSmallIcon(R.drawable.notifications_24)
-        .setContentIntent(pendingIntent)
-        .setAutoCancel(true)
-        .setPriority(NotificationCompat.PRIORITY_HIGH)
-        .build()
+        showNotification(
+            title = data["title"] ?: "New chat message",
+            message = data["message"] ?: "You have a new message",
+            data = data,
+            pendingIntent = PendingIntent.getActivity(
+                this,
+                System.currentTimeMillis().toInt(),
+                intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        )
+    }
+    private fun showNotification(
+        title: String,
+        message: String,
+        data: Map<String, String>,
+        pendingIntent: PendingIntent? = null
+    ) {
+        createNotificationChannel()
 
-    (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-        .notify(roomId.hashCode(), notification)
+        val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(R.drawable.notifications_24)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setVibrate(longArrayOf(1000, 1000)) // Add vibration
+            .setDefaults(NotificationCompat.DEFAULT_SOUND) // Add sound
+
+        pendingIntent?.let {
+            notificationBuilder.setContentIntent(it)
+        }
+
+        notificationManager.notify(System.currentTimeMillis().toInt(), notificationBuilder.build())
+    }
+    private fun showGenericNotification(
+        title: String,
+        message: String,
+        data: Map<String, String>
+    ) {
+        showNotification(
+            title = title,
+            message = message,
+            data = data,
+            pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE
+            )
+        )
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Chat Messages",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Notifications for new chat messages"
+                enableVibration(true)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    companion object {
+        private const val TAG = "FcmService"
+        private const val CHANNEL_ID = "chat_messages"
+    }
 }

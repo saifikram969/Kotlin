@@ -5,6 +5,8 @@ import com.example.quickchat.data.local.AppDatabase
 import com.example.quickchat.data.repository.ChatRepository
 import com.example.quickchat.data.repository.ChatRoomRepository
 import com.example.quickchat.data.repository.FirestoreChatRoomRepository
+import com.example.quickchat.data.repository.PresenceRepository
+import com.example.quickchat.data.repository.PresenceRepositoryImpl
 import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
 import com.google.firebase.firestore.FirebaseFirestore
@@ -34,40 +36,36 @@ val appModule = module {
                 AppDatabase.MIGRATION_10_11,
                 AppDatabase.MIGRATION_11_12,
                 AppDatabase.MIGRATION_12_13,
+                AppDatabase.MIGRATION_13_14,
             )
         .fallbackToDestructiveMigration() // Keep for development
         .build()
     }
-
 
     // ChatMessageDao/// roomChat
     single { get<AppDatabase>().chatMessageDao() }
     single { get<AppDatabase>().chatRoomDao() }
 
     // Repository Bindings
-    single<ChatRoomRepository> {
-        FirestoreChatRoomRepository(
-            firestore = get(),
-            chatRoomDao = get()
-        )
-    }
+    single<ChatRoomRepository> { FirestoreChatRoomRepository(firestore = get(), chatRoomDao = get()) }
+
     // ChatRepository with both Firestore and Room DAO
     single { ChatRepository(get(), get()) }
 
-// provide viewMOdel
-    viewModel { ChatViewModel(get()) }
-
-
-
-
-    // Add ChatRoomListViewModel
-    viewModel { (userId: String) ->
-        ChatRoomListViewModel(
-            repository = get(),
-            chatRepository = get(),
-            userId = userId
+    single<PresenceRepository> {
+        PresenceRepositoryImpl(
+            firestore = get()
         )
     }
+
+
+
+
+// provide viewMOdel
+    viewModel { ChatViewModel(get(), get(),get()) }
+
+    // Add ChatRoomListViewModel
+    viewModel { (userId: String) -> ChatRoomListViewModel(repository = get(), chatRepository = get(), userId = userId) }
 
 
 

@@ -1,5 +1,6 @@
 package com.example.quickchat.data.repository
 
+import android.os.Build
 import android.util.Log
 import com.example.quickchat.data.local.ChatMessageDao
 import com.example.quickchat.data.local.toChatMessage
@@ -8,6 +9,7 @@ import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.ChatRoom
 import com.example.quickchat.data.model.MessageStatus
 import com.example.quickchat.data.model.MessageType
+import com.google.firebase.firestore.BuildConfig
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -18,17 +20,24 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import java.util.Date
+import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.Header
+import retrofit2.http.POST
 import javax.inject.Inject
 
 private const val CHATROOMS_COLLECTION = "chatrooms"
+private val USERS_COLLECTION = "users"
+private const val DEVICES_COLLECTION = "devices"
+
+
 private const val TAG = "ChatRepository"
 
 class ChatRepository @Inject constructor(
@@ -41,20 +50,157 @@ class ChatRepository @Inject constructor(
             .build()
     }
 
-    /* FCM */
+    //
 
-    suspend fun registerFcmToken(userId: String) {
-        try {
-            val token = FirebaseMessaging.getInstance().token.await()
-            database.collection("users")
-                .document(userId)
-                .update("fcmToken", token)
+
+
+
+    /**
+     * Stores the FCM token for a user in Firestore with additional metadata
+     */
+    suspend fun storeFcmToken(deviceId: String, token: String): Boolean {
+        return try {
+            Log.d("FCM_DEBUG", "Attempting to store token for device: $deviceId")
+
+            val tokenData = hashMapOf(
+                "fcmToken" to token,
+                "lastUpdated" to FieldValue.serverTimestamp()
+            )
+
+            database.collection("devices")
+                .document(deviceId)
+                .set(tokenData)
+                .addOnSuccessListener {
+                    Log.d("FCM_DEBUG", "Token successfully stored in Firestore")
+                }
+                .addOnFailureListener { e ->
+                    Log.e("FCM_DEBUG", "Firestore write failed", e)
+                }
                 .await()
+
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "Error registering FCM token", e)
+            Log.e("FCM_DEBUG", "storeFcmToken error", e)
+            false
+        }
+    }    /**
+     * Retrieves the FCM token for a user from Firestore
+     */
+    suspend fun getFcmToken(deviceId: String): String? {
+        return try {
+            val document = database.collection(DEVICES_COLLECTION)
+                .document(deviceId)
+                .get()
+                .await()
+
+            document.getString("fcmToken")?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting FCM token", e)
+            null
+        }
+    }
+    /**
+     * Deletes the FCM token when user logs out
+     */
+    suspend fun deleteFcmToken(userId: String): Boolean {
+        return try {
+            val updates = hashMapOf<String, Any>(
+                "fcmToken" to FieldValue.delete(),
+                "lastUpdated" to FieldValue.serverTimestamp()
+            )
+
+            database.collection(USERS_COLLECTION)
+                .document(userId)
+                .update(updates)
+                .await()
+
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete FCM token", e)
+            false
         }
     }
 
+    /* FCM Token Handling */
+    suspend fun registerAndVerifyFcmToken(userId: String): Boolean {
+        return try {
+            // Step 1: Get FCM token
+            val token = FirebaseMessaging.getInstance().token.await()
+            Log.d(TAG, "FCM Token retrieved: $token")
+
+            // Step 2: Save to Firestore with additional metadata
+            val tokenData = hashMapOf(
+                "fcmToken" to token,
+                "deviceInfo" to Build.MODEL,
+                "lastUpdated" to FieldValue.serverTimestamp(),
+                "appVersion" to BuildConfig.VERSION_NAME
+            )
+
+            database.collection("users")
+                .document(userId)
+                .set(tokenData, SetOptions.merge())
+                .await()
+
+            // Step 3: Verify the token was saved
+            verifyFcmToken(userId)
+        } catch (e: Exception) {
+            Log.e(TAG, "FCM Token registration failed", e)
+            false
+        }
+    }
+
+    suspend fun verifyFcmToken(userId: String): Boolean {
+        return try {
+            val document = database.collection("users")
+                .document(userId)
+                .get()
+                .await()
+
+            val token = document.getString("fcmToken")
+            if (token.isNullOrEmpty()) {
+                Log.w(TAG, "FCM Token is empty for user $userId")
+                return false
+            }
+
+            // Additional verification - check token format
+            token.matches(Regex("[a-zA-Z0-9_-]{152}")).also { isValid ->
+                if (!isValid) {
+                    Log.e(TAG, "Invalid FCM token format for user $userId")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error verifying FCM token", e)
+            false
+        }
+    }
+
+    suspend fun registerFcmToken(userId: String) {
+        try {
+            Log.d(TAG, "Starting FCM token registration for user: $userId")
+
+            // Fetch FCM token
+            val token = FirebaseMessaging.getInstance().token.await()
+            Log.d(TAG, "FCM Token retrieved: $token")
+
+            // Save to Firestore
+            database.collection("users")
+                .document(userId)
+                .set(mapOf("fcmToken" to token), SetOptions.merge())
+                .addOnSuccessListener {
+                    Log.d(TAG, "Firestore: Token saved successfully!")
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Firestore: Failed to save token", e)
+                }
+                .await() // Wait for Firestore write
+
+            Log.d(TAG, "FCM token process completed for $userId")
+        } catch (e: Exception) {
+            Log.e(TAG, "FCM Token Error: ${e.message}", e)
+        }
+    }
+
+    /* Notification Sending */
     suspend fun sendNotification(
         roomId: String,
         senderId: String,
@@ -62,27 +208,97 @@ class ChatRepository @Inject constructor(
         recipientId: String
     ) {
         try {
-            val recipientData = database.collection("users")
-                .document(recipientId)
-                .get()
-                .await()
-                .data ?: return
+            // Get recipient's token and sender's name
+            val (recipientToken, senderName) = getNotificationDetails(senderId, recipientId)
+                ?: return
 
-            val fcmToken = recipientData["fcmToken"] as? String ?: return
+            // Prepare notification payload
+            val message = createNotificationPayload(
+                token = recipientToken,
+                title = senderName,
+                message = messageText,
+                roomId = roomId,
+                senderId = senderId
+            )
 
-            // In a real app, you would send this to your server
-            // or use Firebase Cloud Functions to send the notification
-            // This is just a placeholder
-            Log.d(TAG, "Would send FCM to $fcmToken for message: $messageText")
+            // Send via Firestore (for testing) or your server
+            sendNotificationToFirestore(message)
+
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending notification", e)
+            Log.e(TAG, "Notification sending failed", e)
         }
     }
 
+    private suspend fun getNotificationDetails(
+        senderId: String,
+        recipientId: String
+    ): Pair<String, String>? {
+        val senderData = database.collection("users")
+            .document(senderId)
+            .get()
+            .await()
+            .data ?: run {
+            Log.w(TAG, "Sender data not found")
+            return null
+        }
+
+        val recipientData = database.collection("users")
+            .document(recipientId)
+            .get()
+            .await()
+            .data ?: run {
+            Log.w(TAG, "Recipient data not found")
+            return null
+        }
+
+        val recipientToken = recipientData["fcmToken"] as? String ?: run {
+            Log.w(TAG, "Recipient token not found")
+            return null
+        }
+
+        val senderName = senderData["name"] as? String ?: senderId
+        return recipientToken to senderName
+    }
 
 
+    private fun createNotificationPayload(
+        token: String,
+        title: String,
+        message: String,
+        roomId: String,
+        senderId: String
+    ): Map<String, Any> {
+        return mapOf(
+            "to" to token,
+            "priority" to "high",
+            "data" to mapOf(
+                "title" to title,
+                "message" to message,
+                "roomId" to roomId,
+                "senderId" to senderId,
+                "type" to "chat_message",
+                "timestamp" to System.currentTimeMillis()
+            ),
+            "notification" to mapOf(
+                "title" to title,
+                "body" to message,
+                "sound" to "default",
+                "click_action" to "FLUTTER_NOTIFICATION_CLICK"
+            )
+        )
+    }
 
-
+    private suspend fun sendNotificationToFirestore(message: Map<String, Any>) {
+        database.collection("notification_logs") // Separate collection for tracking
+            .add(message)
+            .addOnSuccessListener {
+                Log.d(TAG, "Notification logged successfully")
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Failed to log notification", e)
+            }
+            .await()
+    }
     // Chat Room Operations
     fun getChatRoomsForUser(userId: String): Flow<List<ChatRoom>> = callbackFlow {
         val listener = database.collection(CHATROOMS_COLLECTION)
@@ -209,10 +425,10 @@ class ChatRepository @Inject constructor(
     // Message Operations
     suspend fun sendMessage(roomId: String, message: ChatMessage): Result<Unit> {
         return try {
-            // First cache the message locally
+            // 1. Cache the message locally
             cacheMessage(roomId, message)
 
-            // Then send to Firestore
+            // 2. Send to Firestore
             database.collection(CHATROOMS_COLLECTION)
                 .document(roomId)
                 .collection("messages")
@@ -220,9 +436,9 @@ class ChatRepository @Inject constructor(
                 .set(message.toFirestoreMap())
                 .await()
 
-            // Update chatroom's last message
+            // 3. Update chatroom's last message
             val updateData = mapOf<String, Any>(
-                "lastMessage" to message.text,
+                "lastMessage" to message.text.take(50), // Preview
                 "lastTimestamp" to message.timestamp,
                 "lastUpdated" to FieldValue.serverTimestamp()
             )
@@ -232,12 +448,178 @@ class ChatRepository @Inject constructor(
                 .update(updateData)
                 .await()
 
+            // 4. Get the other participant's ID and FCM token
+            val roomDoc = database.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .get()
+                .await()
+
+            val participants = roomDoc.get("participants") as? List<String> ?: emptyList()
+            val otherUserId = participants.firstOrNull { it != message.senderId }
+                ?: return Result.success(Unit)
+
+            // 5. Get sender's name for notification
+            val senderName = database.collection("users")
+                .document(message.senderId)
+                .get()
+                .await()
+                .getString("name") ?: "Someone"
+
+            // 6. Send notification
+            suspend fun sendPushNotification(
+                roomId: String,
+                senderDeviceId: String,
+                messageText: String,
+                recipientDeviceId: String
+            ) {
+                try {
+                    // 1. Get recipient's FCM token
+                    val recipientToken = getFcmToken(recipientDeviceId) ?: run {
+                        Log.d(TAG, "No FCM token for recipient device")
+                        return
+                    }
+
+                    // 2. Get sender device info for notification
+                    val senderDoc = database.collection(DEVICES_COLLECTION)
+                        .document(senderDeviceId)
+                        .get()
+                        .await()
+
+                    val senderName = "Device ${senderDeviceId.takeLast(4)}"
+
+                    // 3. Prepare notification data
+                    val data = mapOf(
+                        "type" to "chat_message",
+                        "roomId" to roomId,
+                        "senderDeviceId" to senderDeviceId,
+                        "messagePreview" to messageText.take(30),
+                        "timestamp" to System.currentTimeMillis().toString()
+                    )
+
+                    // 4. Prepare notification payload
+                    val message = mapOf(
+                        "to" to recipientToken,
+                        "data" to data,
+                        "notification" to mapOf(
+                            "title" to senderName,
+                            "body" to messageText.take(100),
+                            "sound" to "default"
+                        ),
+                        "android" to mapOf(
+                            "priority" to "high"
+                        )
+                    )
+
+                    // 5. Log the notification (for debugging)
+                    database.collection("notification_logs")
+                        .add(message)
+                        .await()
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to send notification", e)
+                }
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error sending message", e)
             Result.failure(e)
         }
     }
+
+    private suspend fun sendPushNotification(
+        roomId: String,
+        senderId: String,
+        messageText: String,
+        recipientId: String
+    ) {
+        try {
+            // 1. Get recipient's FCM token from devices collection
+            val recipientToken = database.collection("devices")
+                .document(recipientId)
+                .get()
+                .await()
+                .getString("fcmToken") ?: run {
+                Log.d(TAG, "No FCM token for recipient $recipientId")
+                return
+            }
+
+            Log.d(TAG, "Sending to token: $recipientToken")
+
+            // 2. Get sender's name
+            val senderName = database.collection("users")
+                .document(senderId)
+                .get()
+                .await()
+                .getString("name") ?: "Someone"
+
+            // 3. Prepare FCM payload
+            val message = mapOf(
+                "to" to recipientToken,
+                "priority" to "high",
+                "data" to mapOf(
+                    "type" to "chat_message",
+                    "title" to senderName,
+                    "message" to messageText,
+                    "roomId" to roomId,
+                    "senderId" to senderId,
+                    "timestamp" to System.currentTimeMillis()
+                ),
+                "notification" to mapOf(
+                    "title" to "New message from $senderName",
+                    "body" to messageText.take(100),
+                    "sound" to "default",
+                    "click_action" to "FLUTTER_NOTIFICATION_CLICK"
+                )
+            )
+
+            // 4. Send via FCM API
+            val fcmApi = Retrofit.Builder()
+                .baseUrl("https://fcm.googleapis.com/")
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+                .create(FcmApi::class.java)
+
+            val response = fcmApi.sendMessage(
+                "key=YOUR_SERVER_KEY", // Get from Firebase Console
+                message
+            )
+
+            if (response.isSuccessful) {
+                Log.d(TAG, "Notification sent successfully")
+            } else {
+                Log.e(TAG, "Failed to send notification: ${response.errorBody()?.string()}")
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send notification", e)
+        }
+    }
+
+    interface FcmApi {
+        @POST("fcm/send")
+        suspend fun sendMessage(
+            @Header("Authorization") authorization: String,
+            @Body message: Map<String, Any>
+        ): Response<Unit>
+    }
+
+   /* suspend fun updateUserName(userId: String, name: String) {
+        try {
+            val userData = hashMapOf(
+                "name" to name,
+                "lastUpdated" to FieldValue.serverTimestamp()
+            )
+
+            database.collection("users")
+                .document(userId)
+                .set(userData, SetOptions.merge())
+                .await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating user name", e)
+            throw e
+        }
+    }*/
 
     fun listenToMessages(roomId: String): Flow<List<ChatMessage>> = callbackFlow {
         val listener = database.collection(CHATROOMS_COLLECTION)
@@ -278,7 +660,6 @@ class ChatRepository @Inject constructor(
                                 null
                             }
                         }
-                        // Cache received messages using repositoryScope
                         // Launch caching in IO dispatcher
                         CoroutineScope(Dispatchers.IO).launch {
                             messages.forEach {
@@ -298,7 +679,6 @@ class ChatRepository @Inject constructor(
     }
 
     // Local Cache Operations
-    // Local Cache Operations - Updated functions
     suspend fun cacheMessage(roomId: String, message: ChatMessage) {
         try {
             chatMessageDao.insertMessage(message.toEntity(roomId))
@@ -306,8 +686,6 @@ class ChatRepository @Inject constructor(
             Log.e(TAG, "Error caching message", e)
         }
     }
-
-
 
     suspend fun updateMessageStatus(messageId: String, status: MessageStatus) {
         try {
@@ -383,7 +761,47 @@ class ChatRepository @Inject constructor(
             }
         }
     }
+    suspend fun sendChatNotification(
+        roomId: String,
+        senderId: String,
+        message: String,
+        recipientId: String
+    ): Boolean {
+        return try {
+            val recipientToken = getFcmToken(recipientId) ?: return false
+            val senderName = getUserName(senderId) ?: senderId
 
+            val payload = mapOf(
+                "to" to recipientToken,
+                "data" to mapOf(
+                    "type" to "chat_message",
+                    "title" to senderName,
+                    "message" to message,
+                    "roomId" to roomId,
+                    "senderId" to senderId
+                ),
+                "notification" to mapOf(
+                    "title" to "New message from $senderName",
+                    "body" to message.take(100)
+                )
+            )
+
+            // In production, send to your backend instead
+            database.collection("notification_requests").add(payload).await()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Notification failed", e)
+            false
+        }
+    }
+
+    private suspend fun getUserName(userId: String): String? {
+        return database.collection("users")
+            .document(userId)
+            .get()
+            .await()
+            .getString("name")
+    }
 
     suspend fun debugCache(roomId: String) {
         try {
@@ -396,5 +814,90 @@ class ChatRepository @Inject constructor(
             Log.e(TAG, "Error debugging cache", e)
         }
     }
-}
+
+
+
+
+
+    // Add these presence-related functions
+    fun observeUserPresence(userId: String): Flow<Boolean> = callbackFlow {
+        val presenceRef = database.collection("presence").document(userId)
+        val listener = presenceRef.addSnapshotListener { snapshot, _ ->
+            val isOnline = snapshot?.getBoolean("isOnline") ?: false
+            trySend(isOnline)
+        }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun updateUserPresence(userId: String, isOnline: Boolean) {
+        try {
+            database.collection("presence")
+                .document(userId)
+                .set(
+                    mapOf(
+                        "isOnline" to isOnline,
+                        "lastUpdated" to FieldValue.serverTimestamp(),
+                        "lastSeen" to if (!isOnline) System.currentTimeMillis() else null
+                    ),
+                    SetOptions.merge()
+                )
+                .await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating presence", e)
+        }
+    }
+
+
+
+
+        fun observeTypingStatus(roomId: String, currentUserId: String): Flow<String?> = callbackFlow {
+            val listener = database.collection("chatrooms")
+                .document(roomId)
+                .collection("typingStatus")
+                .addSnapshotListener { snapshot, _ ->
+                    snapshot?.documents?.forEach { doc ->
+                        val userId = doc.id
+                        val isTyping = doc.getBoolean("isTyping") ?: false
+                        if (userId != currentUserId && isTyping) {
+                            trySend(userId)
+                            return@addSnapshotListener
+                        }
+                    }
+                    trySend(null)
+                }
+            awaitClose { listener.remove() }
+        }
+
+        suspend fun updateTypingStatus(roomId: String, userId: String, isTyping: Boolean) {
+            try {
+                database.collection("chatrooms")
+                    .document(roomId)
+                    .collection("typingStatus")
+                    .document(userId)
+                    .set(
+                        mapOf(
+                            "isTyping" to isTyping,
+                            "timestamp" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating typing status", e)
+            }
+        }
+
+    suspend fun getRoomParticipants(roomId: String): List<String> {
+        return database.collection(CHATROOMS_COLLECTION)
+            .document(roomId)
+            .get()
+            .await()
+            .get("participants") as? List<String> ?: emptyList()
+    }
+
+    }
+
+
+
+
+
 

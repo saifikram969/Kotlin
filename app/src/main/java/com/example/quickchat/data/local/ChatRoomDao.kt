@@ -10,6 +10,7 @@ interface ChatRoomDao {
     // Fixed: Changed 'timestamp' to 'lastTimestamp'
     @Query("SELECT * FROM chat_rooms WHERE userId = :userId ORDER BY lastTimestamp DESC")
     fun getChatRooms(userId: String): Flow<List<ChatRoom>>
+
     @Query("SELECT * FROM chat_rooms ORDER BY lastTimestamp DESC")
     fun getAllChatRooms(): Flow<List<ChatRoom>>
 
@@ -30,4 +31,26 @@ interface ChatRoomDao {
 
     @Query("DELETE FROM chat_rooms")
     suspend fun clearAll()
+
+    @Query("SELECT unreadCount FROM chat_rooms WHERE roomId = :roomId AND userId = :userId")
+    fun getUnreadCountFlow(roomId: String, userId: String): Flow<Int>
+
+
+    // New queries for FCM token management
+    @Query("UPDATE chat_rooms SET fcmTokens = :tokensJson WHERE roomId = :roomId")
+    suspend fun updateFcmTokens(roomId: String, tokensJson: String)
+
+    @Query("SELECT fcmTokens FROM chat_rooms WHERE roomId = :roomId")
+    suspend fun getFcmTokens(roomId: String): String?
+
+    @Query("UPDATE chat_rooms SET isArchived = :isArchived WHERE roomId = :roomId")
+    suspend fun updateArchiveStatus(roomId: String, isArchived: Boolean)
+
+    @Query("UPDATE chat_rooms SET isMuted = :isMuted WHERE roomId = :roomId")
+    suspend fun updateMuteStatus(roomId: String, isMuted: Boolean)
+
+    @Query("UPDATE chat_rooms SET unreadCount = :count WHERE roomId = :roomId AND userId = :userId")
+    suspend fun updateUnreadCount(roomId: String, userId: String, count: Int)
+
+
 }

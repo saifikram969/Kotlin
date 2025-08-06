@@ -1,6 +1,7 @@
 package com.example.quickchat
 
 import android.app.Application
+import android.content.ContentValues.TAG
 import android.util.Log
 import com.cloudinary.android.MediaManager
 import com.example.quickchat.di.appModule
@@ -15,6 +16,8 @@ class myApp : Application() {
         // Initialize Firebase
         try {
             FirebaseApp.initializeApp(this)?.let {
+                Log.d("FCM_DEBUG", "Firebase initialized")
+                Log.d("lalo", "Firebase initialized")
                 Log.d("FirebaseInit", "Firebase initialized successfully.")
             } ?: Log.e("FirebaseInit", "Firebase initialization failed.")
         } catch (e: Exception) {

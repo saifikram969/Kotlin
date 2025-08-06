@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -23,6 +24,7 @@ import kotlinx.coroutines.delay
 fun ChatTopBar(
     chatRoomName: String,
     participantName: String,
+    isOnline: Boolean,
     onBackClick: () -> Unit,
     onMoreOptionsClick: () -> Unit
 ) {
@@ -40,12 +42,29 @@ fun ChatTopBar(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = chatRoomName,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = chatRoomName,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    // Online status indicator
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = if (isOnline) Color(0xFF4CAF50) else Color(0xFF9E9E9E),
+                                shape = MaterialTheme.shapes.small
+                            )
+                    )
+                }
+
                 AnimatedVisibility(
                     visible = showJoinedText,
                     enter = slideInHorizontally(
@@ -57,14 +76,24 @@ fun ChatTopBar(
                         animationSpec = tween(600)
                     )
                 ) {
-                    Text(
-                        text = "$participantName joined the chat room",
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        color = Color(0xFF81C784), // Light green color
-
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "$participantName joined the chat room",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            color = Color(0xFF81C784), // Light green color
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isOnline) "• Online" else "• Offline",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isOnline) Color(0xFF81C784) else Color(0xFF9E9E9E),
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         },
@@ -96,6 +125,29 @@ fun PreviewChatTopBar() {
                 ChatTopBar(
                     chatRoomName = "QuickChat Room",
                     participantName = "Akbar",
+                    isOnline = true,
+                    onBackClick = {},
+                    onMoreOptionsClick = {}
+                )
+            }
+        ) { innerPadding ->
+            Box(modifier = Modifier.padding(innerPadding)) {
+                Text("Chat content goes here", modifier = Modifier.padding(16.dp))
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewChatTopBarOffline() {
+    MaterialTheme {
+        Scaffold(
+            topBar = {
+                ChatTopBar(
+                    chatRoomName = "QuickChat Room",
+                    participantName = "Akbar",
+                    isOnline = false,
                     onBackClick = {},
                     onMoreOptionsClick = {}
                 )

@@ -60,6 +60,25 @@ fun ChatScreen(
     var isUploading by remember { mutableStateOf(false) }
     var uploadProgress by remember { mutableStateOf(0f) }
 
+    // Presence state
+    val presenceStatus by viewModel.presenceStatus.collectAsState()
+
+    // Handle lifecycle events for presence
+    DisposableEffect(Unit) {
+        viewModel.updatePresence(currentUserId, true)
+        viewModel.observePresence(otherUserId)
+
+        onDispose {
+            viewModel.updatePresence(currentUserId, false)
+        }
+    }
+
+    LaunchedEffect(roomId) {
+        viewModel.initializeChat(roomId, currentUserId)
+        viewModel.observeTypingStatus(roomId, currentUserId)
+        viewModel.markMessagesAsRead(roomId, currentUserId)
+        viewModel.observePresence(otherUserId)
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -155,7 +174,6 @@ fun ChatScreen(
         }
     }
 
-
     val uiState by viewModel.uiState.collectAsState()
     val typingUserId by viewModel.typingUserId.collectAsState()
     var messageText by remember { mutableStateOf("") }
@@ -183,18 +201,11 @@ fun ChatScreen(
         wasOffline = !isOnline
     }
 
-    LaunchedEffect(roomId) {
-        viewModel.initializeChat(roomId, currentUserId)
-        viewModel.observeTypingStatus(roomId, currentUserId)
-        viewModel.markMessagesAsRead(roomId, currentUserId)
-    }
-
-
-
     Column(modifier = Modifier.fillMaxSize()) {
         ChatTopBar(
             chatRoomName = "Chat Room",
             participantName = otherUserId,
+            isOnline = presenceStatus ?: false,
             onBackClick = onBackClick,
             onMoreOptionsClick = {}
         )
@@ -217,7 +228,6 @@ fun ChatScreen(
                     delay(100) // optional: wait for layout
                     listState.animateScrollToItem(state.messages.lastIndex)
                 }
-
 
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -295,7 +305,7 @@ fun ChatScreen(
                                 onValueChange = {
                                     if (it.length <= maxCharCount) {
                                         messageText = it
-                                        viewModel.updateTypingStatus(roomId, currentUserId, true)
+                                        viewModel.updateTypingStatus(roomId, currentUserId, it.isNotEmpty())
                                     }
                                 },
                                 modifier = Modifier.weight(1f).padding(end = 8.dp),

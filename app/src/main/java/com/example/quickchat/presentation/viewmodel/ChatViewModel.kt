@@ -6,22 +6,23 @@ import androidx.lifecycle.viewModelScope
 import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.MessageStatus
 import com.example.quickchat.data.model.MessageType
-import com.example.quickchat.data.model.TypingIndicator
 import com.example.quickchat.data.repository.ChatRepository
+import com.example.quickchat.data.repository.ChatRoomRepository
+import com.example.quickchat.data.repository.PresenceRepository
 import com.google.firebase.Firebase
-import android.net.Uri
-import com.example.quickchat.data.model.CloudinaryUploadResponse
-
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
-private const val CHATROOMS_COLLECTION = "chatrooms" // lowercase everywhere
 
-class ChatViewModel(private val repository: ChatRepository,
-    //private val cloudinaryRepository: CloudinaryRepository
+private const val CHATROOMS_COLLECTION = "chatrooms"
+
+class ChatViewModel(
+    private val repository: ChatRepository,
+    private val chatRoomRepository: ChatRoomRepository,
+    private val presenceRepository: PresenceRepository
 ) : ViewModel() {
 
     private val _uploadResult = MutableStateFlow<CloudinaryUploadResponse?>(null)
@@ -33,51 +34,59 @@ class ChatViewModel(private val repository: ChatRepository,
     private val _uploadError = MutableStateFlow<String?>(null)
     val uploadError: StateFlow<String?> = _uploadError
 
-
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
     val uiState: StateFlow<ChatUiState> = _uiState
 
     private val _typingUserId = MutableStateFlow<String?>(null)
     val typingUserId: StateFlow<String?> = _typingUserId
 
+    private val _presenceStatus = MutableStateFlow<Boolean?>(null)
+    val presenceStatus: StateFlow<Boolean?> = _presenceStatus
+
+    private var currentRoomId: String? = null
+    private var currentUserId: String? = null
+    private var otherUserId: String? = null
 
     init {
         Log.d("VM_LIFECYCLE", "ViewModel INITIALIZED - Hash: ${hashCode()}")
     }
-    fun uploadImage(uri: Uri) {
-        _uploading.value = true
+
+    suspend fun storeFcmToken(deviceId: String, token: String) {
+        repository.storeFcmToken(deviceId, token)
+    }
+
+    override fun onCleared() {
+        currentUserId?.let { userId ->
+            updatePresence(userId, false)
+        }
+        super.onCleared()
+    }
+
+    fun observePresence(userId: String) {
         viewModelScope.launch {
-            try {
-              //  val result = cloudinaryRepository.uploadImage(uri)
-              //  _uploadResult.value = result
-            } catch (e: Exception) {
-                _uploadError.value = "Failed to upload image: ${e.message}"
-                Log.e("ChatViewModel", "Image upload failed", e)
-            } finally {
-                _uploading.value = false
+            presenceRepository.observeUserPresence(userId).collect { isOnline ->
+                _presenceStatus.value = isOnline
             }
         }
     }
 
-    override fun onCleared() {
-        super.onCleared()
+    fun updatePresence(userId: String, isOnline: Boolean) {
+        viewModelScope.launch {
+            presenceRepository.updateUserPresence(userId, isOnline)
+        }
     }
 
     fun onScreenEntered(roomId: String, userId: String) {
         viewModelScope.launch {
-            // Mark all messages as read when entering the chat
             repository.updateLastReadTimestamp(
                 roomId = roomId,
                 userId = userId,
                 timestamp = System.currentTimeMillis()
             )
 
-            // Also update local unread count
             _uiState.update { currentState ->
                 if (currentState is ChatUiState.Success) {
-                    currentState.copy(
-                        // Reset unread count for this room
-                    )
+                    currentState.copy()
                 } else {
                     currentState
                 }
@@ -85,16 +94,11 @@ class ChatViewModel(private val repository: ChatRepository,
         }
     }
 
-    // Add this to handle notification deep links
-    fun handleDeepLink(roomId: String, currentUserId: String) {
-        onScreenEntered(roomId, currentUserId)
-        initializeChat(roomId, currentUserId)
-    }
-
     fun markMessagesAsRead(roomId: String, userId: String) {
         viewModelScope.launch {
             try {
                 repository.updateLastReadTimestamp(roomId, userId, System.currentTimeMillis())
+                chatRoomRepository.markMessagesAsRead(roomId, userId)
                 Log.d("ChatViewModel", "Messages marked as read for room $roomId")
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Error marking messages as read", e)
@@ -102,9 +106,33 @@ class ChatViewModel(private val repository: ChatRepository,
         }
     }
 
+    fun handleNotificationDeepLink(roomId: String, currentUserId: String) {
+        viewModelScope.launch {
+            markMessagesAsRead(roomId, currentUserId)
+            initializeChat(roomId, currentUserId)
+        }
+    }
+
+    fun getUnreadCount(roomId: String, userId: String): Flow<Int> {
+        return chatRoomRepository.getUnreadCountFlow(roomId, userId)
+    }
+
     fun initializeChat(roomId: String, currentUserId: String) {
+        this.currentRoomId = roomId
+        this.currentUserId = currentUserId
+
         viewModelScope.launch {
             try {
+                // First get the other participant ID
+                val participants = repository.getRoomParticipants(roomId)
+                otherUserId = participants.firstOrNull { it != currentUserId }
+
+                // Start observing presence
+                otherUserId?.let { observePresence(it) }
+
+                // Update our own presence
+                updatePresence(currentUserId, true)
+
                 // Combine cached and remote messages
                 repository.listenToMessages(roomId)
                     .catch { e ->
@@ -126,13 +154,13 @@ class ChatViewModel(private val repository: ChatRepository,
             }
         }
     }
+
     fun sendMessage(
         roomId: String,
         senderId: String,
         text: String? = null,
         imageUrl: String? = null,
-        thumbnailUrl: String? =  null
-
+        thumbnailUrl: String? = null
     ) {
         viewModelScope.launch {
             try {
@@ -163,27 +191,7 @@ class ChatViewModel(private val repository: ChatRepository,
         }
     }
 
-    fun sendImageMessage(roomId: String, senderId: String, imageUrl: String) {
-        viewModelScope.launch {
-            try {
-                val newMessage = createMessage(senderId, "", MessageType.IMAGE).copy(
-                    imageUrl = imageUrl
-                )
-                updateMessages(newMessage)
-
-                repository.sendMessage(roomId, newMessage).onSuccess {
-                    updateMessageStatus(newMessage.id, MessageStatus.SENT)
-                }.onFailure { e ->
-                    updateMessageStatus(newMessage.id, MessageStatus.FAILED)
-                    Log.e("SEND_ERROR", "Failed to send image", e)
-                }
-            } catch (e: Exception) {
-                Log.e("SEND_ERROR", "Unexpected error sending image", e)
-            }
-        }
-    }
-
-    val _otherUserTyping = MutableStateFlow<String?>(null)
+    private val _otherUserTyping = MutableStateFlow<String?>(null)
     val otherUserTyping: StateFlow<String?> = _otherUserTyping
 
     private fun createMessage(
@@ -273,7 +281,7 @@ class ChatViewModel(private val repository: ChatRepository,
     fun setTypingTemporarily(userId: String) {
         _typingUserId.value = userId
         viewModelScope.launch {
-            delay(3000) // 3 seconds
+            delay(3000)
             if (_typingUserId.value == userId) {
                 _typingUserId.value = null
             }
@@ -316,3 +324,8 @@ sealed class ChatUiState {
 
     data class Error(val message: String) : ChatUiState()
 }
+
+data class CloudinaryUploadResponse(
+    val secureUrl: String,
+    val thumbnailUrl: String? = null
+)

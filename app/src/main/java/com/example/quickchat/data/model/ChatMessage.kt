@@ -6,6 +6,7 @@ data class ChatMessage(
     val id: String = "",
     val text: String = "",
     val senderId: String = "",
+    val fcmToken: String = "",
     val imageUrl: String?,
     val messageType: MessageType = MessageType.TEXT,
     val timestamp: Long = System.currentTimeMillis(),

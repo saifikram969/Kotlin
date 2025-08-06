@@ -8,6 +8,7 @@ import java.util.*
 class Converters {
     private val gson = Gson()
     private val stringListType = (object : TypeToken<List<String>>() {}).type
+    private val stringMapType = (object : TypeToken<Map<String, String>>() {}).type
 
     @TypeConverter
     fun stringListToJson(value: List<String>?): String {
@@ -21,8 +22,20 @@ class Converters {
         } catch (e: Exception) {
             emptyList()
         }
+    }
 
+    @TypeConverter
+    fun stringMapToJson(value: Map<String, String>?): String {
+        return gson.toJson(value ?: emptyMap<String, String>())
+    }
 
+    @TypeConverter
+    fun jsonToStringMap(value: String?): Map<String, String> {
+        return try {
+            gson.fromJson<Map<String, String>>(value ?: "{}", stringMapType)
+        } catch (e: Exception) {
+            emptyMap()
+        }
     }
 
     @TypeConverter

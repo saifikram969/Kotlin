@@ -11,7 +11,7 @@ import com.example.quickchat.data.model.ChatRoom
 
 @Database(
     entities = [ChatMessageEntity::class, ChatRoom::class], // Include both entities
-    version = 13, // Increment version since we're changing schema
+    version = 14, // Increment version since we're changing schema
     exportSchema = true
 )
 @TypeConverters(Converters::class) // Add this for List<String> conversion
@@ -169,7 +169,14 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-
+        // Migration from 13 to 14 - Add fcmTokens column
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE chat_rooms ADD COLUMN fcmTokens TEXT NOT NULL DEFAULT '{}'"
+                )
+            }
+        }
 
     }
 }

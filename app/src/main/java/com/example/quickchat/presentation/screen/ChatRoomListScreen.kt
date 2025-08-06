@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
@@ -190,6 +191,7 @@ private fun ChatRoomListContent(
     }
 }
 
+
 @Composable
 fun SwipeActionsItem(
     onArchive: () -> Unit,
@@ -293,6 +295,10 @@ fun ChatRoomListItem(
     onMuteToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+
+
+
+
     val otherUserId = room.participants.firstOrNull { it != currentUserId } ?: ""
     val dateFormat = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
     val timeString by remember(room.lastTimestamp) {
@@ -413,8 +419,21 @@ fun ChatRoomListItem(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 if (room.unreadCount > 0) {
-                    Badge {
-                        Text(text = room.unreadCount.toString())
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = CircleShape
+                            )
+                    ) {
+                        Text(
+                            text = room.unreadCount.toString(),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1
+                        )
                     }
                 }
             }

@@ -2,59 +2,112 @@ package com.example.quickchat
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.example.quickchat.navigation.ChatAppNavHost
 import com.example.quickchat.navigation.Routes
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
 import com.example.quickchat.ui.theme.QuickChatTheme
+import com.example.quickchat.utils.DeviceIdHelper
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.tasks.await
 import org.koin.androidx.compose.koinViewModel
-import kotlin.math.log
 
 class MainActivity : ComponentActivity() {
+    private val TAG = "MainActivity"
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        logCurrentToken() // Call this temporarily
-
+        logCurrentToken()
+        requestNotificationPermission()
         createNotificationChannel()
-        setContent {
-            QuickChatTheme {
-                // Create navController at the root level
-                val navController = rememberNavController()
+        handleIntent(intent)
 
-                // Surface provides proper background color
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    ChatAppNavHost(navController = navController)
-                    HandleDeepLinks(navController)
+        setContent {
+            QuickChatApp()
+        }
+    }
+
+    @Composable
+    private fun QuickChatApp() {
+        QuickChatTheme {
+            val navController = rememberNavController()
+            val currentUserId = remember { getCurrentUserId() }
+            val viewModel: ChatViewModel = koinViewModel()
+            val context = LocalContext.current
+            val deviceId = remember { DeviceIdHelper.getDeviceId(context) }
+
+            LaunchedEffect(Unit) {
+                try {
+                    val token = FirebaseMessaging.getInstance().token.await()
+                    viewModel.storeFcmToken(deviceId, token)
+                } catch (e: Exception) {
+                    Log.e(TAG, "FCM token initialization failed", e)
+                }
+            }
+
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                ChatAppNavHost(navController = navController)
+                HandleDeepLinks(navController, currentUserId, viewModel)
+            }
+        }
+    }
+
+    @Composable
+    private fun HandleDeepLinks(
+        navController: androidx.navigation.NavController,
+        currentUserId: String,
+        viewModel: ChatViewModel
+    ) {
+        val context = LocalContext.current
+
+        LaunchedEffect(Unit) {
+            (context as? MainActivity)?.intent?.extras?.let { extras ->
+                when (extras.getString("deep_link_action")) {
+                    "open_chat" -> {
+                        val roomId = extras.getString("room_id") ?: return@let
+                        val senderId = extras.getString("sender_id") ?: return@let
+
+                        if (currentUserId.isNotEmpty()) {
+                            viewModel.markMessagesAsRead(roomId, currentUserId)
+                            navController.navigate(
+                                Routes.chatScreenRoute(
+                                    currentUserId = currentUserId,
+                                    roomId = roomId,
+                                    otherUserId = senderId
+                                )
+                            ) {
+                                popUpTo(Routes.chatRoomsRoute(currentUserId))
+                                launchSingleTop = true
+                            }
+                        }
+                    }
                 }
             }
         }
-        handleIntent(intent)
-        logCurrentToken()
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleIntent(intent)
+    private fun handleIntent(intent: Intent?) {
+        // Handled in HandleDeepLinks composable
     }
-
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -63,49 +116,41 @@ class MainActivity : ComponentActivity() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notifications for new chat messages"
+                enableVibration(true)
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
     }
 
-    private fun handleIntent(intent: Intent) {
-        val roomId = intent.getStringExtra("deep_link_room_id") ?: return
-        val senderId = intent.getStringExtra("deep_link_sender_id") ?: return
+    private fun getCurrentUserId(): String {
+        val sharedPref = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        return sharedPref.getString("current_user_id", "") ?: ""
     }
 
-    @Composable
-    private fun HandleDeepLinks(navController: NavController) {
-        val context = LocalContext.current
-        val viewModel: ChatViewModel = koinViewModel()
-
-        LaunchedEffect(Unit) {
-            (context as? MainActivity)?.intent?.extras?.let { extras ->
-                val roomId = extras.getString("deep_link_room_id") ?: return@let
-                val senderId = extras.getString("deep_link_sender_id") ?: return@let
-
-                // Mark messages as read when coming from notification
-                viewModel.onScreenEntered(roomId, senderId)
-
-                navController.navigate(Routes.chatScreenRoute(
-                    currentUserId = senderId,
-                    roomId = roomId,
-                    otherUserId = "other_user"
-                )) {
-                    popUpTo(Routes.chatRoomsRoute(senderId)) { inclusive = false }
-                    launchSingleTop = true
-                }
-            }
-        }
-    }
     private fun logCurrentToken() {
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (task.isSuccessful) {
-                Log.d("FCM_DEBUG", "Manual token: ${task.result}")
+                Log.d(TAG, "FCM token: ${task.result}")
             } else {
-                Log.e("FCM_DEBUG", "Token failed", task.exception)
+                Log.e(TAG, "Token failed", task.exception)
             }
         }
     }
 
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Log.d(TAG, "Notification permission granted")
+        } else {
+            Log.w(TAG, "Notification permission denied")
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 }

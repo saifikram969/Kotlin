@@ -1,12 +1,10 @@
 package com.example.quickchat.presentation.viewmodel
-
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.quickchat.data.model.ChatRoom
 import com.example.quickchat.data.repository.ChatRepository
 import com.example.quickchat.data.repository.ChatRoomRepository
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
@@ -42,60 +40,11 @@ class ChatRoomListViewModel @Inject constructor(
         data class Success(val roomId: String) : RoomCreationState()
         data class Error(val message: String) : RoomCreationState()
     }
-
-
-
-
-
-
-    /* swipe tp delete logic */
-// In ChatRoomListViewModel
+    /* swipe to delete logic */
     data class UndoAction(val roomId: String, val action: String)
     private val _showUndo = MutableStateFlow<UndoAction?>(null)
     val showUndo: StateFlow<UndoAction?> = _showUndo
 
-    fun deleteRoom(roomId: String) {
-        viewModelScope.launch {
-            try {
-                _chatRooms.value = _chatRooms.value.filter { it.roomId != roomId }
-                repository.deleteRoom(roomId)
-                _showUndo.value = UndoAction(roomId, "deleted")
-            } catch (e: Exception) {
-                _error.value = "Failed to delete room: ${e.message}"
-                fetchChatRooms()
-            }
-        }
-    }
-    fun archiveRoom(roomId: String) {
-        viewModelScope.launch {
-            try {
-                _chatRooms.value = _chatRooms.value.filter { it.roomId != roomId }
-                repository.archiveRoom(roomId, true)
-                _showUndo.value = UndoAction(roomId, "archived")
-            } catch (e: Exception) {
-                _error.value = "Failed to archive room: ${e.message}"
-                fetchChatRooms()
-            }
-        }
-    }
-    fun undoAction(roomId: String, action: String) {
-        viewModelScope.launch {
-            try {
-                when (action) {
-                    "archived" -> repository.archiveRoom(roomId, false)
-                    "deleted" -> repository.restoreRoom(roomId)
-                }
-                fetchChatRooms()
-            } catch (e: Exception) {
-                _error.value = "Failed to undo $action: ${e.message}"
-            } finally {
-                clearUndo()
-            }
-        }
-    }
-    fun clearUndo() {
-        _showUndo.value = null
-    }
     init {
         println("ViewModel initialized with userId: $userId")
         fetchChatRooms()
@@ -114,20 +63,27 @@ class ChatRoomListViewModel @Inject constructor(
                 .collectLatest { rooms ->
                     _chatRooms.value = rooms
                     _isLoading.value = false
-                    // Debug log to verify rooms are being received
                     Log.d("ChatRooms", "Fetched ${rooms.size} rooms")
                 }
         }
     }
 
+    // Removed the 'override' keyword since this isn't overriding anything
     suspend fun markAsRead(roomId: String) {
+        Log.d("UNREAD_DEBUG", " ViewModel markAsRead called for room $roomId")
         try {
-            repository.updateLastReadTimestamp(
-                roomId = roomId,
-                userId = userId,
-                timestamp = System.currentTimeMillis()
-            )
+            repository.markMessagesAsRead(roomId, userId)
+
+            _chatRooms.value = _chatRooms.value.map { room ->
+                if (room.roomId == roomId) {
+                    Log.d("UNREAD_DEBUG", " Updating UI state for room $roomId")
+                    room.copy(unreadCount = 0)
+                } else {
+                    room
+                }
+            }
         } catch (e: Exception) {
+            Log.e("UNREAD_DEBUG", " Error in markAsRead: ${e.message}", e)
             _error.value = "Failed to mark as read: ${e.message}"
         }
     }
@@ -141,6 +97,52 @@ class ChatRoomListViewModel @Inject constructor(
                 _error.value = "Navigation failed: ${e.message}"
             }
         }
+    }
+
+    fun deleteRoom(roomId: String) {
+        viewModelScope.launch {
+            try {
+                _chatRooms.value = _chatRooms.value.filter { it.roomId != roomId }
+                repository.deleteRoom(roomId)
+                _showUndo.value = UndoAction(roomId, "deleted")
+            } catch (e: Exception) {
+                _error.value = "Failed to delete room: ${e.message}"
+                fetchChatRooms()
+            }
+        }
+    }
+
+    fun archiveRoom(roomId: String) {
+        viewModelScope.launch {
+            try {
+                _chatRooms.value = _chatRooms.value.filter { it.roomId != roomId }
+                repository.archiveRoom(roomId, true)
+                _showUndo.value = UndoAction(roomId, "archived")
+            } catch (e: Exception) {
+                _error.value = "Failed to archive room: ${e.message}"
+                fetchChatRooms()
+            }
+        }
+    }
+
+    fun undoAction(roomId: String, action: String) {
+        viewModelScope.launch {
+            try {
+                when (action) {
+                    "archived" -> repository.archiveRoom(roomId, false)
+                    "deleted" -> repository.restoreRoom(roomId)
+                }
+                fetchChatRooms()
+            } catch (e: Exception) {
+                _error.value = "Failed to undo $action: ${e.message}"
+            } finally {
+                clearUndo()
+            }
+        }
+    }
+
+    fun clearUndo() {
+        _showUndo.value = null
     }
 
     fun createChatRoom(otherUserId: String) {
@@ -168,13 +170,6 @@ class ChatRoomListViewModel @Inject constructor(
         _error.value = null
     }
 
-    private val _muteOperations = mutableMapOf<String, Boolean>()
-
-
-// In ChatRoomListViewModel
-    private val _pendingMuteOperations = mutableMapOf<String, Boolean>()
-
-// In ChatRoomListViewModel.kt
     fun toggleMuteStatus(roomId: String) {
         viewModelScope.launch {
             try {
@@ -182,10 +177,9 @@ class ChatRoomListViewModel @Inject constructor(
                 val currentRoom = currentRooms.first { it.roomId == roomId }
                 val newMutedState = !currentRoom.isMuted
 
-                // 2. UI ko immediately update kare loading state dikhane ke liye
                 _chatRooms.value = currentRooms.map { room ->
                     if (room.roomId == roomId) {
-                        room.copy(isProcessingMute = true) // Sirf loading dikhao
+                        room.copy(isProcessingMute = true)
                     } else {
                         room
                     }
@@ -215,7 +209,9 @@ class ChatRoomListViewModel @Inject constructor(
                 _error.value = "Failed to toggle mute status: ${e.message}"
             }
         }
-    }    fun updateRoomsPreservingMuteState(newRooms: List<ChatRoom>) {
+    }
+
+    fun updateRoomsPreservingMuteState(newRooms: List<ChatRoom>) {
         val currentRooms = _chatRooms.value
         _chatRooms.value = newRooms.map { newRoom ->
             currentRooms.find { it.roomId == newRoom.roomId }?.let { currentRoom ->
@@ -228,28 +224,48 @@ class ChatRoomListViewModel @Inject constructor(
         }
     }
 
-
     fun onNewMessageReceived(roomId: String, message: String) {
+        Log.d("lao", " New message received in room $roomId")
         viewModelScope.launch {
-            val updatedRooms = _chatRooms.value.map { room ->
-                if (room.roomId == roomId) {
-                    // Only update last message if NOT muted
-                    if (!room.isMuted) {
-                        room.copy(
-                            lastMessage = message,
-                            lastTimestamp = System.currentTimeMillis(),
-                            unreadCount = room.unreadCount + 1
-                        )
+            try {
+                val currentRoom = _chatRooms.value.firstOrNull { it.roomId == roomId }
+
+                if (currentRoom != null) {
+                    if (!currentRoom.isMuted) {
+                        Log.d("lalo", " Room is not muted, incrementing count")
+                        repository.incrementUnreadCount(roomId, userId)
+
+                        _chatRooms.value = _chatRooms.value.map { room ->
+                            if (room.roomId == roomId) {
+                                val newCount = room.unreadCount + 1
+                                Log.d("lalo", " Updating UI count to $newCount")
+                                room.copy(
+                                    lastMessage = message,
+                                    lastTimestamp = System.currentTimeMillis(),
+                                    unreadCount = newCount
+                                )
+                            } else {
+                                room
+                            }
+                        }
                     } else {
-                        // If muted, keep everything same but update timestamp
-                        room.copy(lastTimestamp = System.currentTimeMillis())
+                        Log.d("lalo", " Room is muted, not incrementing count")
+                        _chatRooms.value = _chatRooms.value.map { room ->
+                            if (room.roomId == roomId) {
+                                room.copy(
+                                    lastMessage = message,
+                                    lastTimestamp = System.currentTimeMillis()
+                                )
+                            } else {
+                                room
+                            }
+                        }
                     }
                 } else {
-                    room
+                    Log.e("lalo", " Room $roomId not found in UI state!")
                 }
+            } catch (e: Exception) {
+                Log.e("lalo", " Error in onNewMessageReceived: ${e.message}", e)
             }
-            _chatRooms.value = updatedRooms
         }
-    }
-
-}
+    }}

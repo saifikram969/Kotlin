@@ -12,16 +12,15 @@ data class ChatRoom(
     val lastMessage: String?,
     val lastTimestamp: Long,
     val unreadCount: Int,
-    val userId: String,  // To associate rooms with users
+    val userId: String,
     val participants: List<String> = emptyList(),
-    val lastRead: Long = 0L, // For tracking read status
+    val lastRead: Long = 0L,
     val isArchived: Boolean = false,
     val isDeleted: Boolean = false,
     val isMuted: Boolean = false,
     val isProcessingMute: Boolean = false,
-    val pendingMuteState: Boolean? = null
-
-
+    val pendingMuteState: Boolean? = null,
+    val fcmTokens: Map<String, String> = emptyMap()
 
 ){
 // Helper function to convert to Firestore map
@@ -32,7 +31,8 @@ fun toFirestoreMap(): Map<String, Any> {
         "lastTimestamp" to lastTimestamp,
         "participants" to participants,
         "isArchived" to isArchived,
-        "isMuted" to isMuted
+        "isMuted" to isMuted,
+        "fcmTokens" to fcmTokens
     )
 
     // Add lastRead fields for all participants
