@@ -1,0 +1,22 @@
+[33ma4786cd[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mQuickChat[m[33m, [m[1;31morigin/QuickChat[m[33m)[m feat implemented typing indicator
+[33m2939b4e[m feat: implemented typing indicator
+[33mf6e3d8a[m feat: add user presence tracking with online/offline and last seen status
+[33m3d6603a[m Update README.md
+[33m87cea61[m feat: Image sending implemented - with validation image only 5mb siz send - image compressor support thumbnail
+[33m70c8f17[m Update README.md
+[33m6605c89[m feat:  Chatroom list UI with unread count, avatar, and swipe actions - Fetched chatrooms for active current user from Firestore - Displayed avatar, last message, and timestamp for each chatroom -  Calculated unreadCount using lastReadTimestamp - Added swipe gestures for delete and archive chatroom (UI only or functional)
+[33m585ab80[m feat: Implement chat room listing with unread count calculation
+[33mdbdf7db[m Update README.md
+[33maef433c[m feat: create Chatroom UI or fetch locally or firstore
+[33maae9b90[m Update README.md
+[33m555e25c[m feat: sync message functionality implemented & also test using debugging
+[33mf83db3e[m feat: room database implemented using offline caching
+[33m5538120[m fix: Verified no listener leaks through lifecycle management
+[33m510a987[m feat: implement real-time chat between 2 users in testing mode
+[33m882422b[m Update README.md
+[33m6d702b5[m Update README.md
+[33m90876e9[m fix: restored stashed changes after accidental pull
+[33md93eb5f[m feat: implement message sending with Firestore and delivery status handling
+[33m1af65fa[m Update README.md
+[33m73347fb[m Create README.md
+[33mb38bda1[m create chat layout with dummy data

@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.outlined.Image
@@ -91,9 +92,25 @@ fun ChatScreen(
         // ... (keep existing image picker code) ...
     }
 
+
+
+
+
+
     val uiState by viewModel.uiState.collectAsState()
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+
+
+    val showScrollToBottomButton by remember {
+        derivedStateOf {
+            val lastVisibleItemIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+            val totalItemsCount = listState.layoutInfo.totalItemsCount
+            lastVisibleItemIndex != null && totalItemsCount > 0 && lastVisibleItemIndex < totalItemsCount - 1
+        }
+    }
+
 
     val charCount by remember { derivedStateOf { messageText.length } }
     val maxCharCount = 300
@@ -140,7 +157,10 @@ fun ChatScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+    ) {
         ChatTopBar(
             chatRoomName = "Chat Room",
             participantName = otherUserId,
@@ -165,26 +185,82 @@ fun ChatScreen(
                 val (systemMessages, regularMessages) = state.messages.partition { it.isSystemMessage }
 
                 LaunchedEffect(state.messages) {
-                    delay(100) // optional: wait for layout
-                    listState.animateScrollToItem(state.messages.lastIndex)
+                    delay(100) // Let layout settle
+
+                    // Scroll to the last index in LazyColumn — account for date headers
+                    val groupedMessages = state.messages
+                        .filterNot { it.isSystemMessage }
+                        .groupBy {
+                            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
+                        }
+
+                    // Total item count = total headers + total messages
+                    val totalItems = groupedMessages.size + state.messages.count { !it.isSystemMessage }
+
+                    if (totalItems > 0) {
+                        listState.scrollToItem(totalItems - 1)
+                    }
                 }
 
-                LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    state = listState,
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    val groupedMessages = regularMessages.groupBy {
-                        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
-                    }
 
-                    groupedMessages.forEach { (dateKey, messagesForDate) ->
-                        item(key = "header_$dateKey") { DateHeader(dateKey) }
-                        items(messagesForDate, key = { it.id }) { message ->
-                            MessageBubble(message, message.senderId == state.currentUserId)
+
+
+
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        state = listState,
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        val groupedMessages = regularMessages.groupBy {
+                            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
+                        }
+                        groupedMessages.forEach { (dateKey, messagesForDate) ->
+                            item(key = "header_$dateKey") { DateHeader(dateKey) }
+                            items(messagesForDate, key = { it.id }) { message ->
+                                MessageBubble(message, message.senderId == state.currentUserId)
+                            }
                         }
                     }
+
+                    // Scroll to bottom FAB
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showScrollToBottomButton,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                    ) {
+                        FloatingActionButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    delay(100) // Allow layout to stabilize
+                                    val groupedMessages = state.messages
+                                        .filterNot { it.isSystemMessage }
+                                        .groupBy {
+                                            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
+                                        }
+
+                                    val totalItems = groupedMessages.size + state.messages.count { !it.isSystemMessage }
+
+                                    if (totalItems > 0) {
+                                        listState.scrollToItem(totalItems - 1)
+                                    }
+                                }
+                            },
+                            containerColor = MaterialTheme.colorScheme.onSurface
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowDownward,
+                                contentDescription = "Scroll to bottom",
+                                tint = Color.White
+                            )
+                        }
+
+                    }
                 }
+
 
                 Column {
                     if (messageText.isNotEmpty()) {
@@ -256,8 +332,21 @@ fun ChatScreen(
                                         isTyping = false
                                         coroutineScope.launch {
                                             delay(100)
-                                            listState.animateScrollToItem(state.messages.lastIndex)
+
+                                            val groupedMessages = state.messages
+                                                .filterNot { it.isSystemMessage }
+                                                .groupBy {
+                                                    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
+                                                }
+
+                                            val totalItems = groupedMessages.size + state.messages.count { !it.isSystemMessage }
+
+                                            if (totalItems > 0) {
+                                                listState.animateScrollToItem(totalItems - 1)
+                                            }
                                         }
+
+
                                     }
                                 },
                                 enabled = messageText.isNotBlank(),
