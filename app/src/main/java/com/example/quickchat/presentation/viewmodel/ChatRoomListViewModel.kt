@@ -149,18 +149,32 @@ class ChatRoomListViewModel @Inject constructor(
         viewModelScope.launch {
             _roomCreationState.value = RoomCreationState.Loading
             try {
-                val result = repository.createChatRoom(userId, otherUserId)
-                if (result.isSuccess) {
-                    _roomCreationState.value = RoomCreationState.Success(result.getOrThrow())
-                    fetchChatRooms()
+                // Check if room already exists
+                val potentialRoomId = listOf(userId, otherUserId).sorted().joinToString("_")
+                val roomExists = repository.doesRoomExist(potentialRoomId)
+
+                if (roomExists) {
+                    _roomCreationState.value = RoomCreationState.Error("Chat already exists")
                 } else {
-                    _roomCreationState.value = RoomCreationState.Error(result.exceptionOrNull()?.message ?: "Failed to create room")
+                    val result = repository.createChatRoom(userId, otherUserId)
+                    if (result.isSuccess) {
+                        _roomCreationState.value = RoomCreationState.Success(result.getOrThrow())
+                        fetchChatRooms() // Refresh the list
+                    } else {
+                        _roomCreationState.value = RoomCreationState.Error(
+                            result.exceptionOrNull()?.message ?: "Failed to create room"
+                        )
+                    }
                 }
             } catch (e: Exception) {
-                _roomCreationState.value = RoomCreationState.Error(e.message ?: "Failed to create room")
+                _roomCreationState.value = RoomCreationState.Error(
+                    e.message ?: "Failed to create room"
+                )
             }
         }
     }
+
+
 
     fun resetRoomCreationState() {
         _roomCreationState.value = RoomCreationState.Idle

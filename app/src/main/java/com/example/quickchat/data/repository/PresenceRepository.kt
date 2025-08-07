@@ -105,15 +105,48 @@ class PresenceRepositoryImpl @Inject constructor(
     }
 
     override fun observeUserPresence(userId: String): Flow<Boolean> = callbackFlow {
-        val listener = presenceCollection.document(userId)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
+        // 1. Add validation for user ID
+        if (userId.isBlank()) {
+            close(IllegalArgumentException("User ID cannot be empty"))
+            return@callbackFlow
+        }
+
+        // 2. Add logging for debugging
+        println("Observing presence for user: $userId")
+
+        // 3. Safely create document reference
+        val docRef = try {
+            presenceCollection.document(userId)
+        } catch (e: IllegalArgumentException) {
+            close(e)
+            return@callbackFlow
+        }
+
+        // 4. Add proper error handling
+        val listener = docRef.addSnapshotListener { snapshot, error ->
+            when {
+                error != null -> {
+                    close(error)
                     return@addSnapshotListener
                 }
-                val isOnline = snapshot?.getBoolean("isOnline") ?: false
-                trySend(isOnline)
+                snapshot == null || !snapshot.exists() -> {
+                    trySend(false) // Default to offline if no snapshot
+                }
+                else -> {
+                    val isOnline = snapshot.getBoolean("isOnline") ?: false
+                    val sendResult = trySend(isOnline)
+                    if (sendResult.isFailure) {
+                        close() // Close if channel is full or cancelled
+                    }
+                }
             }
-        awaitClose { listener.remove() }
+        }
+
+        // 5. Handle coroutine cancellation
+        awaitClose {
+            listener.remove()
+            println("Presence observation stopped for user: $userId")
+        }
     }
 
     override suspend fun updateTypingStatus(roomId: String, userId: String, isTyping: Boolean) {

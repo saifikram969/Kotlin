@@ -72,12 +72,38 @@ class ChatViewModel(
 
     fun observePresence(userId: String) {
         viewModelScope.launch {
-            presenceRepository.observeUserPresence(userId).collect { isOnline ->
-                _presenceStatus.value = isOnline
+            // 1. Validate user ID first
+            if (userId.isBlank()) {
+                Log.e("ChatViewModel", "Cannot observe presence - empty user ID")
+                _presenceStatus.value = null
+                return@launch
             }
+
+            // 2. Observe presence with proper error handling
+            presenceRepository.observeUserPresence(userId)
+                .onStart {
+                    Log.d("ChatViewModel", "Starting presence observation for user: $userId")
+                    _presenceStatus.value = null // Reset while loading
+                }
+                .catch { e ->
+                    Log.e("ChatViewModel", "Error observing presence for $userId", e)
+                    _presenceStatus.value = null
+                }
+                .collect { isOnline ->
+                    Log.d("ChatViewModel", "Presence update for $userId: ${if (isOnline) "online" else "offline"}")
+                    _presenceStatus.value = isOnline
+
+                    // Update UI state if needed
+                    _uiState.update { currentState ->
+                        if (currentState is ChatUiState.Success) {
+                            currentState.copy() // You can add presence info here if needed
+                        } else {
+                            currentState
+                        }
+                    }
+                }
         }
     }
-
     fun updatePresence(userId: String, isOnline: Boolean) {
         viewModelScope.launch {
             presenceRepository.updateUserPresence(userId, isOnline)

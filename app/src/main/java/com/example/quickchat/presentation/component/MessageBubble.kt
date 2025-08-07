@@ -35,14 +35,15 @@ fun MessageBubble(
         Column(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalAlignment = if (isCurrentUser) Alignment.End else Alignment.Start
         ) {
             when {
                 message.imageUrl != null -> {
                     ImageMessageComponent(
                         url = message.imageUrl,
-                        isCurrentUser = isCurrentUser
+                        isCurrentUser = isCurrentUser,
+                        modifier = Modifier.padding(bottom = 4.dp)
                     )
                     if (!message.text.isNullOrEmpty()) {
                         Text(
@@ -67,7 +68,8 @@ fun MessageBubble(
 @Composable
 private fun ImageMessageComponent(
     url: String,
-    isCurrentUser: Boolean
+    isCurrentUser: Boolean,
+    modifier: Modifier
 ) {
     var showFullScreen by remember { mutableStateOf(false) }
     val bubbleColor = if (isCurrentUser) MaterialTheme.colorScheme.primaryContainer

@@ -27,7 +27,8 @@ fun ChatTopBar(
     isOnline: Boolean,
     isTyping: Boolean,
     onBackClick: () -> Unit,
-    onMoreOptionsClick: () -> Unit
+    onMoreOptionsClick: () -> Unit,
+    modifier: Modifier
 ) {
     var showStatusText by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
@@ -192,6 +193,7 @@ fun ChatTopBar(
     )
 }
 
+/*
 @Preview(showBackground = true)
 @Composable
 fun PreviewChatTopBarTyping() {
@@ -204,7 +206,7 @@ fun PreviewChatTopBarTyping() {
                     isOnline = true,
                     isTyping = true,
                     onBackClick = {},
-                    onMoreOptionsClick = {}
+                    onMoreOptionsClick = {},
                 )
             }
         ) { innerPadding ->
@@ -227,7 +229,7 @@ fun PreviewChatTopBarOffline() {
                     isOnline = false,
                     isTyping = false,
                     onBackClick = {},
-                    onMoreOptionsClick = {}
+                    onMoreOptionsClick = {},
                 )
             }
         ) { innerPadding ->
@@ -236,4 +238,4 @@ fun PreviewChatTopBarOffline() {
             }
         }
     }
-}
+}*/

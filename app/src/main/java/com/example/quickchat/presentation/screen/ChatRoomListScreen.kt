@@ -3,6 +3,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import com.example.quickchat.presentation.component.CreateRoomBottomSheet
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
@@ -11,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -29,8 +31,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.quickchat.R
 import com.example.quickchat.data.model.ChatRoom
+import com.example.quickchat.presentation.component.CreateRoomBottomSheet
 import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import org.koin.androidx.compose.koinViewModel
@@ -51,8 +55,11 @@ fun ChatRoomListScreen(
     val error by viewModel.error.collectAsState()
     val creationState by viewModel.roomCreationState.collectAsState()
     val showUndo by viewModel.showUndo.collectAsState()
-
+    // Existing state declarations...
+    var showCreateRoomSheet by remember { mutableStateOf(false) }
+    var newChatUsername by remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     // Handle undo action
     LaunchedEffect(showUndo) {
@@ -69,23 +76,31 @@ fun ChatRoomListScreen(
         }
     }
 
+    // Handle room creation state changes
+    // Handle room creation state changes
+    // Handle room creation state changes
     LaunchedEffect(creationState) {
         when (creationState) {
             is ChatRoomListViewModel.RoomCreationState.Success -> {
                 val roomId = (creationState as ChatRoomListViewModel.RoomCreationState.Success).roomId
+                showCreateRoomSheet = false
+                newChatUsername = ""
                 viewModel.resetRoomCreationState()
+                val otherUserId = newChatUsername
+                onChatRoomClick(roomId, otherUserId)
             }
             is ChatRoomListViewModel.RoomCreationState.Error -> {
                 val errorMessage = (creationState as ChatRoomListViewModel.RoomCreationState.Error).message
-                snackbarHostState.showSnackbar(
-                    message = errorMessage ?: "Failed to create chat room",
-                    withDismissAction = true
-                )
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        message = errorMessage ?: "Failed to create chat room",
+                        withDismissAction = true
+                    )
+                }
             }
             else -> {}
         }
     }
-
     LaunchedEffect(Unit) {
         viewModel.fetchChatRooms()
     }
@@ -115,6 +130,15 @@ fun ChatRoomListScreen(
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showCreateRoomSheet = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Create new chat")
+            }
         }
     ) { innerPadding ->
         Box(
@@ -146,8 +170,28 @@ fun ChatRoomListScreen(
                     isLoading = isLoading
                 )
             }
+
+            // Using the external CreateRoomBottomSheet component
+            CreateRoomBottomSheet(
+                show = showCreateRoomSheet,
+                onDismiss = {
+                    showCreateRoomSheet = false
+                    newChatUsername = ""
+                    viewModel.resetRoomCreationState()
+                },
+                username = newChatUsername,
+                onUsernameChange = { newChatUsername = it },
+                onCreateClick = {
+                    if (newChatUsername.isNotBlank()) {
+                        viewModel.createChatRoom(newChatUsername)
+                    }
+                },
+                isLoading = creationState is ChatRoomListViewModel.RoomCreationState.Loading
+            )
         }
     }
+
+
 }
 
 @OptIn(ExperimentalFoundationApi::class)
