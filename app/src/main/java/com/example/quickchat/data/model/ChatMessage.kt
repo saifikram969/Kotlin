@@ -57,5 +57,5 @@ enum class MessageType {
 }
 
 enum class MessageStatus {
-    SENDING, DELIVERED, SENT, FAILED
+    SENDING, DELIVERED, SENT, SEEN, FAILED
 }

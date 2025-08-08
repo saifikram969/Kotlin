@@ -1,11 +1,18 @@
 package com.example.quickchat.presentation.component
 
+import android.R.attr.contentDescription
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.example.quickchat.R
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -13,11 +20,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter.Companion.tint
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter.State.Empty.painter
 import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.MessageStatus
 import java.text.SimpleDateFormat
@@ -167,38 +177,80 @@ private fun TextMessageBubble(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+
+
             Row(
                 modifier = Modifier.align(Alignment.End),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Timestamp
                 Text(
-                    text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp)),
+                    text = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                        .format(Date(message.timestamp)),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray.copy(alpha = 0.8f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
 
-                if (isCurrentUser && message.status != MessageStatus.DELIVERED) {
-                    Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Status indicator - only show for current user's messages
+                if (isCurrentUser) {
                     when (message.status) {
-                        MessageStatus.SENDING -> Icon(
-                            Icons.Outlined.Send,
-                            contentDescription = "Sending",
-                            tint = Color.Gray,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        MessageStatus.SENT -> Icon(
-                            Icons.Outlined.Done,
-                            contentDescription = "Sent",
-                            tint = Color.Gray,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        MessageStatus.FAILED -> Icon(
-                            Icons.Outlined.Clear,
-                            contentDescription = "Failed",
-                            tint = Color.Red,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        else -> {}
+                        MessageStatus.SENDING -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 1.dp,
+                                color = Color.White
+                            )
+                        }
+                        MessageStatus.SENT -> {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Sent",
+                                modifier = Modifier.size(12.dp),
+                                tint = Color.White
+                            )
+                        }
+                        MessageStatus.DELIVERED -> {
+                            Row(horizontalArrangement = Arrangement.spacedBy((-4).dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Delivered",
+                                    modifier = Modifier.size(12.dp),
+                                    tint = Color.White
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Delivered",
+                                    modifier = Modifier.size(12.dp),
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                        MessageStatus.SEEN -> {
+                            Row(horizontalArrangement = Arrangement.spacedBy((-4).dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Seen",
+                                    modifier = Modifier.size(12.dp),
+                                    tint = Color.Blue
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Seen",
+                                    modifier = Modifier.size(12.dp),
+                                    tint = Color.Blue
+                                )
+                            }
+                        }
+                        MessageStatus.FAILED -> {
+                            Icon(
+                                imageVector = Icons.Default.Error,
+                                contentDescription = "Failed",
+                                modifier = Modifier.size(12.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             }

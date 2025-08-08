@@ -131,15 +131,30 @@ class ChatViewModel(
     fun markMessagesAsRead(roomId: String, userId: String) {
         viewModelScope.launch {
             try {
+                // Update last read timestamp
                 repository.updateLastReadTimestamp(roomId, userId, System.currentTimeMillis())
-                chatRoomRepository.markMessagesAsRead(roomId, userId)
-                Log.d("ChatViewModel", "Messages marked as read for room $roomId")
+
+                // Mark messages as seen
+                repository.markMessagesAsSeen(roomId, userId)
+
+                // Update UI
+                val currentState = _uiState.value
+                if (currentState is ChatUiState.Success) {
+                    _uiState.value = currentState.copy(
+                        messages = currentState.messages.map { message ->
+                            if (message.senderId == userId && message.status != MessageStatus.SEEN) {
+                                message.copy(status = MessageStatus.SEEN)
+                            } else {
+                                message
+                            }
+                        }
+                    )
+                }
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Error marking messages as read", e)
             }
         }
     }
-
     fun handleNotificationDeepLink(roomId: String, currentUserId: String) {
         viewModelScope.launch {
             markMessagesAsRead(roomId, currentUserId)
@@ -157,27 +172,15 @@ class ChatViewModel(
 
         viewModelScope.launch {
             try {
-                // First get the other participant ID
+                // Mark messages as read when opening chat
+                markMessagesAsRead(roomId, currentUserId)
+
+                // Rest of initialization...
                 val participants = repository.getRoomParticipants(roomId)
                 otherUserId = participants.firstOrNull { it != currentUserId }
 
-                // Start observing presence
-                otherUserId?.let { observePresence(it) }
-
-                // Update our own presence
-                updatePresence(currentUserId, true)
-
-                // Start observing typing status
-                otherUserId?.let { userId ->
-                    observeTypingStatus(roomId, userId)
-                }
-
-                // Combine cached and remote messages
+                // Observe messages with status updates
                 repository.listenToMessages(roomId)
-                    .catch { e ->
-                        _uiState.value = ChatUiState.Error("Failed to load chat: ${e.message}")
-                        Log.e("ChatViewModel", "Error listening to messages", e)
-                    }
                     .collect { messages ->
                         val sortedMessages = messages.sortedBy { it.timestamp }
                         _uiState.value = ChatUiState.Success(
@@ -188,12 +191,10 @@ class ChatViewModel(
                         )
                     }
             } catch (e: Exception) {
-                _uiState.value = ChatUiState.Error("Unexpected error occurred: ${e.message}")
-                Log.e("ChatViewModel", "Error initializing chat", e)
+                _uiState.value = ChatUiState.Error("Error initializing chat: ${e.message}")
             }
         }
     }
-
     fun sendMessage(
         roomId: String,
         senderId: String,
@@ -217,13 +218,15 @@ class ChatViewModel(
                     text = text ?: "",
                     messageType = messageType
                 ).copy(
-                    imageUrl = imageUrl
-                )
+                    imageUrl = imageUrl,
+                    status = MessageStatus.SENDING // Start with SENDING status
 
+                )
+                // Add to UI immediately with SENDING status
                 updateMessages(newMessage)
 
                 repository.sendMessage(roomId, newMessage).onSuccess {
-                    updateMessageStatus(newMessage.id, MessageStatus.SENT)
+                    // Status will be updated by the snapshot listener
                 }.onFailure { e ->
                     updateMessageStatus(newMessage.id, MessageStatus.FAILED)
                     Log.e("SEND_ERROR", "Failed to send message", e)
@@ -311,13 +314,22 @@ class ChatViewModel(
         }
     }
 
+    // In ChatViewModel
     private fun updateMessageStatus(messageId: String, status: MessageStatus) {
-        val state = _uiState.value
-        if (state is ChatUiState.Success) {
-            val updatedMessages = state.messages.map {
-                if (it.id == messageId) it.copy(status = status) else it
+        _uiState.update { currentState ->
+            if (currentState is ChatUiState.Success) {
+                val updatedMessages = currentState.messages.map {
+                    if (it.id == messageId) it.copy(status = status) else it
+                }
+                currentState.copy(messages = updatedMessages)
+            } else {
+                currentState
             }
-            _uiState.value = state.copy(messages = updatedMessages)
+        }
+
+        // Update in local database
+        viewModelScope.launch {
+            repository.updateMessageStatus(messageId, status)
         }
     }
 
@@ -352,13 +364,33 @@ class ChatViewModel(
         }
     }
 
+
+
+
+
+    // In ChatViewModel
     fun onNetworkRestored(roomId: String) {
         viewModelScope.launch {
+            // 1. First sync any message gaps
             repository.syncMessageGaps(roomId)
+
+            // 2. Get all failed messages
             val failedMessages = repository.getFailedMessages(roomId)
-            failedMessages.forEach { retryMessage(roomId, it) }
+
+            // 3. Retry each with exponential backoff
+            failedMessages.forEachIndexed { index, message ->
+                launch {
+                    // Exponential backoff: 1s, 2s, 4s, etc.
+                    delay((1L shl index.coerceAtMost(5)) * 1000)
+                    retryMessage(roomId, message)
+                }
+            }
         }
     }
+
+
+
+
 }
 
 sealed class ChatUiState {

@@ -60,6 +60,8 @@ class PresenceRepositoryImpl @Inject constructor(
         // Presence will be updated when activity resumes
     }
 
+
+
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
 
     override fun onActivityStarted(activity: Activity) {
@@ -179,4 +181,7 @@ class PresenceRepositoryImpl @Inject constructor(
             }
         awaitClose { listener.remove() }
     }
+
+
+
 }
