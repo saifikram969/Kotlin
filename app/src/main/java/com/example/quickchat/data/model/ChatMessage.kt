@@ -1,7 +1,10 @@
 package com.example.quickchat.data.model
 
 import com.google.firebase.firestore.Exclude
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Serializer
 
+@Serializable
 data class ChatMessage(
     val id: String = "",
     val text: String = "",
@@ -13,7 +16,9 @@ data class ChatMessage(
     val isSystemMessage: Boolean = false,
     val clientGeneratedId: String = "",
     val isRead: Boolean = false,
-    val status: MessageStatus = MessageStatus.SENDING
+    val status: MessageStatus = MessageStatus.SENDING,
+    val retryCount: Int? = 0,
+    val lastUpdated: Long = System.currentTimeMillis()
 ) {
     @Exclude
     fun toFirestoreMap(): Map<String, Any?> {
@@ -27,7 +32,9 @@ data class ChatMessage(
             "isSystemMessage" to isSystemMessage,
             "clientGeneratedId" to clientGeneratedId,
             "isRead" to isRead,
-            "status" to status.name
+            "status" to status.name,
+            "retryCount" to retryCount,
+            "lastUpdated" to lastUpdated
         )
     }
 
@@ -43,7 +50,10 @@ data class ChatMessage(
                 isSystemMessage = map["isSystemMessage"] as? Boolean ?: false,
                 clientGeneratedId = map["clientGeneratedId"] as? String ?: "",
                 isRead = map["isRead"] as? Boolean ?: false,
-                status = MessageStatus.valueOf(map["status"] as? String ?: "SENDING")
+                status = MessageStatus.valueOf(map["status"] as? String ?: "SENDING"),
+                retryCount = map["retryCount"] as? Int ?: 0,
+                lastUpdated = map["lastUpdated"] as? Long ?: System.currentTimeMillis()
+
             )
         }
     }
@@ -55,7 +65,7 @@ enum class MessageType {
     VIDEO,
     FILE
 }
-
+@Serializable
 enum class MessageStatus {
-    SENDING, DELIVERED, SENT, SEEN, FAILED
+    SENDING, SENT, DELIVERED, SEEN, FAILED
 }

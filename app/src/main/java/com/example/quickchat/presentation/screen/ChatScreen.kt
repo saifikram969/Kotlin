@@ -1,9 +1,18 @@
 package com.example.quickchat.presentation.screen
 
+import android.content.ActivityNotFoundException
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
+import androidx.compose.material.icons.outlined.Archive
 import android.os.Build
+import android.content.Intent
+import com.example.quickchat.utils.ChatExporter
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.DisposableEffect
 import android.provider.MediaStore
 import android.util.Log
@@ -24,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Image
@@ -35,10 +45,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import coil.compose.AsyncImage
 import com.cloudinary.android.MediaManager
 import com.cloudinary.android.callback.ErrorInfo
 import com.cloudinary.android.callback.UploadCallback
+import com.example.quickchat.data.model.MessageStatus
 import com.example.quickchat.presentation.component.ChatTopBar
 import com.example.quickchat.presentation.component.MessageBubble
 import com.example.quickchat.presentation.viewmodel.ChatUiState
@@ -49,6 +61,8 @@ import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
+import java.nio.file.WatchEvent
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -60,6 +74,12 @@ fun ChatScreen(
     otherUserId: String,
     onBackClick: () -> Unit
 ) {
+
+    // Add this LaunchedEffect to mark messages as read when screen is shown
+    LaunchedEffect(Unit) {
+        viewModel.markMessagesAsRead(roomId, currentUserId)
+    }
+
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var isUploading by remember { mutableStateOf(false) }
@@ -68,6 +88,11 @@ fun ChatScreen(
     // Presence state
     val presenceStatus by viewModel.presenceStatus.collectAsState()
     val otherUserTyping by viewModel.otherUserTyping.collectAsState()
+
+// drop down mene delete chatroom or export chat
+    var showOptionsMenu by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     // Handle lifecycle events for presence
     DisposableEffect(Unit) {
@@ -79,6 +104,7 @@ fun ChatScreen(
             viewModel.updateTypingStatus(roomId, currentUserId, false)
         }
     }
+
 
     // Combined initialization and cleanup effect
     DisposableEffect(roomId, currentUserId, otherUserId) {
@@ -197,6 +223,24 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsState()
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    LaunchedEffect(uiState) {
+        if (uiState is ChatUiState.Success) {
+            val messages = (uiState as ChatUiState.Success).messages
+            if (messages.any {
+                    it.senderId != currentUserId &&
+                            it.status != MessageStatus.SEEN
+                }) {
+                viewModel.markMessagesAsRead(roomId, currentUserId)
+            }
+        }
+    }
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (!listState.isScrollInProgress) {
+            // When scrolling stops, mark messages as read
+            viewModel.markMessagesAsRead(roomId, currentUserId)
+        }
+    }
+
 
     val showScrollToBottomButton by remember {
         derivedStateOf {
@@ -261,9 +305,234 @@ fun ChatScreen(
             isOnline = presenceStatus ?: false,
             isTyping = otherUserTyping,
             onBackClick = onBackClick,
-            onMoreOptionsClick = {},
+            onMoreOptionsClick = { showOptionsMenu = true },
             modifier = Modifier.padding(horizontal = 4.dp)
         )
+
+        // Updated Options dropdown menu - opens upwards
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.TopEnd
+        ) {
+            // Custom popup that matches WhatsApp style exactly
+            if (showOptionsMenu) {
+                Card(
+                    modifier = Modifier
+                        .width(220.dp)
+                        .padding(end = 16.dp, top = 8.dp)
+                        .offset(y = (-16).dp), // Adjust this to position perfectly
+                    elevation = CardDefaults.cardElevation(8.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        // Export options section
+                        Text(
+                            text = "Export chat",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 8.dp)
+                        )
+
+                        // Without media option
+                        TextButton(
+                            onClick = {
+                                showOptionsMenu = false
+                                showExportDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    Icons.Outlined.FileDownload,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text("Export chat")
+                            }
+                        }
+
+                        // With media (ZIP) option
+                        TextButton(
+                            onClick = {
+                                showOptionsMenu = false
+                                coroutineScope.launch {
+                                    try {
+                                        if (uiState is ChatUiState.Success) {
+                                            val messages = (uiState as ChatUiState.Success).messages
+                                            val uri = ChatExporter.exportToZip(context, messages, roomId)
+                                            val shareIntent = ChatExporter.createShareIntent(
+                                                context = context,
+                                                uri = uri,
+                                                type = "application/zip"
+                                            )
+                                            context.startActivity(Intent.createChooser(
+                                                shareIntent,
+                                                "Export chat"
+                                            ))
+                                        }
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            context,
+                                            "Export failed: ${e.localizedMessage}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Archive,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text("Export chat(ZIP)")
+                            }
+                        }
+
+                        Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+                        // Delete option
+                        TextButton(
+                            onClick = {
+                                showOptionsMenu = false
+                                showDeleteDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    contentDescription = null,
+                                    tint = Color.Red,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text("Delete chatroom", color = Color.Red)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+// Export confirmation dialog
+        // Export dialog
+        // Export dialog
+        if (showExportDialog && uiState is ChatUiState.Success) {
+            val messages = (uiState as ChatUiState.Success).messages
+            AlertDialog(
+                onDismissRequest = { showExportDialog = false },
+                title = { Text("Export Chat") },
+                text = { Text("Choose the format to export your chat history:") },
+                confirmButton = {
+                    Row {
+                        // TXT Export Button
+                        TextButton(
+                            onClick = {
+                                showExportDialog = false
+                                coroutineScope.launch {
+                                    try {
+                                        val uri = ChatExporter.exportToTxt(context, messages, roomId)
+                                        val shareIntent = ChatExporter.createShareIntent(
+                                            context = context,
+                                            uri = uri,
+                                            type = "text/plain"
+                                        )
+                                        context.startActivity(Intent.createChooser(shareIntent, "Export chat as TXT"))
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            context,
+                                            "TXT export failed: ${e.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        Log.e("ChatScreen", "TXT export failed", e)
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("TXT")
+                        }
+
+                        // JSON Export Button
+                        TextButton(
+                            onClick = {
+                                showExportDialog = false
+                                coroutineScope.launch {
+                                    try {
+                                        val uri = ChatExporter.exportToJson(context, messages, roomId)
+                                        val shareIntent = ChatExporter.createShareIntent(
+                                            context = context,
+                                            uri = uri,
+                                            type = "application/json"
+                                        )
+                                        context.startActivity(Intent.createChooser(shareIntent, "Export chat as JSON"))
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            context,
+                                            "JSON export failed: ${e.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        Log.e("ChatScreen", "JSON export failed", e)
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("JSON")
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showExportDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+// Delete confirmation dialog
+        if (showDeleteDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false },
+                title = { Text("Delete Chatroom") },
+                text = { Text("Are you sure you want to delete this chatroom? All messages will be permanently deleted.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showDeleteDialog = false
+                            viewModel.deleteChatroom(roomId)
+                            onBackClick() // Navigate back after deletion
+                        }
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showDeleteDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
 
         if (isUploading) {
             LinearProgressIndicator(
@@ -505,6 +774,9 @@ fun ChatScreen(
         }
     }
 }
+
+
+
 
 @Composable
 fun DateHeader(dateKey: String) {

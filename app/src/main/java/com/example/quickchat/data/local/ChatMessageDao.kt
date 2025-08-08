@@ -34,7 +34,15 @@ interface ChatMessageDao {
     @Query("SELECT MAX(timestamp) FROM chat_messages WHERE roomId = :roomId")
     suspend fun getNewestTimestamp(roomId: String): Long?
 
+//offline query
+    @Query("SELECT * FROM chat_messages WHERE roomId = :roomId AND status = 'SENDING'")
+    suspend fun getPendingMessages(roomId: String): List<ChatMessageEntity>
 
+    @Query("SELECT * FROM chat_messages WHERE roomId = :roomId AND timestamp > :sinceTimestamp ORDER BY timestamp ASC")
+    fun getMessagesSince(roomId: String, sinceTimestamp: Long): Flow<List<ChatMessageEntity>>
+
+    @Query("SELECT * FROM chat_messages WHERE roomId = :roomId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestMessage(roomId: String): ChatMessageEntity?
 
 
 }

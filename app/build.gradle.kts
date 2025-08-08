@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
+    id("org.jetbrains.kotlin.plugin.serialization")
     kotlin("kapt")
 }
 
@@ -45,7 +46,7 @@ android {
 }
 dependencies {
 
-    // ✅ Firestore and Messaging with BOM (no need to specify version)
+    // Firestore and Messaging with BOM (no need to specify version)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.firestore.ktx)
     implementation(libs.firebase.messaging.ktx)
@@ -86,6 +87,7 @@ dependencies {
 
     //other
     implementation("androidx.lifecycle:lifecycle-process:2.9.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 
 
     // Room Database

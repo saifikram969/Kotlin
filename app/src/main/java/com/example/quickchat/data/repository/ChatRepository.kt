@@ -10,6 +10,7 @@ import com.example.quickchat.data.model.ChatRoom
 import com.example.quickchat.data.model.MessageStatus
 import com.example.quickchat.data.model.MessageType
 import com.google.firebase.firestore.BuildConfig
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -53,6 +54,14 @@ class ChatRepository @Inject constructor(
     // ==================== Message Status Tracking Enhancements ====================
 
     suspend fun sendMessageWithStatusTracking(roomId: String, message: ChatMessage): Result<Unit> {
+
+        // 0. Check network first
+        if (!isNetworkAvailable()) {
+            updateMessageStatus(message.id, MessageStatus.FAILED)
+            return Result.failure(Exception("No network connection"))
+        }
+
+
         return try {
             // 1. Cache the message locally with SENDING status
             cacheMessage(roomId, message.copy(status = MessageStatus.SENDING))
@@ -105,7 +114,7 @@ class ChatRepository @Inject constructor(
 
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending message with status tracking", e)
+            Log.e("smwt", "Error sending message with status tracking", e)
             updateMessageStatus(message.id, MessageStatus.FAILED)
             Result.failure(e)
         }
@@ -186,6 +195,76 @@ class ChatRepository @Inject constructor(
         }
     }
 
+// In ChatRepository.kt
+
+    suspend fun markMessagesAsRead(roomId: String, userId: String) {
+        try {
+            // First get the last read timestamp
+            val lastRead = System.currentTimeMillis()
+
+            // Update all messages that are:
+            // 1. Not sent by this user
+            // 2. Have status DELIVERED or SENT
+            val unreadMessages = database.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("messages")
+                .whereNotEqualTo("senderId", userId)
+                .whereIn("status", listOf(MessageStatus.DELIVERED.name, MessageStatus.SENT.name))
+                .get()
+                .await()
+
+            // Batch update to SEEN status
+            val batch = database.batch()
+            unreadMessages.documents.forEach { doc ->
+                batch.update(doc.reference, mapOf(
+                    "status" to MessageStatus.SEEN.name,
+                    "statusTimestamps.read" to lastRead
+                ))
+            }
+
+            // Also update the room's lastRead timestamp
+            batch.update(
+                database.collection(CHATROOMS_COLLECTION).document(roomId),
+                mapOf("lastRead_$userId" to lastRead)
+            )
+
+            batch.commit().await()
+
+            // Update local cache
+            unreadMessages.documents.forEach { doc ->
+                updateMessageStatus(doc.id, MessageStatus.SEEN)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error marking messages as read", e)
+        }
+    }
+
+
+    fun listenForMessageStatusUpdates(roomId: String, userId: String): Flow<Pair<String, MessageStatus>> = callbackFlow {
+        val listener = database.collection(CHATROOMS_COLLECTION)
+            .document(roomId)
+            .collection("messages")
+            .whereEqualTo("senderId", userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                snapshot?.documentChanges?.forEach { change ->
+                    if (change.type == DocumentChange.Type.MODIFIED) {
+                        val messageId = change.document.id
+                        val status = MessageStatus.valueOf(
+                            change.document.getString("status") ?: MessageStatus.SENDING.name
+                        )
+                        trySend(messageId to status)
+                    }
+                }
+            }
+
+        awaitClose { listener.remove() }
+    }
+
     suspend fun updateMessageStatusOnServer(roomId: String, messageId: String, status: MessageStatus) {
         try {
             val updateData = mapOf<String, Any>(
@@ -246,14 +325,14 @@ class ChatRepository @Inject constructor(
     }
 
     private suspend fun retrySingleMessage(roomId: String, message: ChatMessage) {
-        try {
-            // First check network availability
-            if (!isNetworkAvailable()) {
-                // Keep showing loader, don't mark as failed yet
-                updateMessageStatus(message.id, MessageStatus.SENDING)
-                return
-            }
+        updateMessageStatus(message.id, MessageStatus.SENDING)
 
+        if (!isNetworkAvailable()) {
+            updateMessageStatus(message.id, MessageStatus.FAILED)
+            return
+        }
+
+        try {
             // Rest of your retry logic...
         } catch (e: Exception) {
             // Only mark as failed if we actually attempted to send
@@ -265,8 +344,10 @@ class ChatRepository @Inject constructor(
 
     suspend fun isNetworkAvailable(): Boolean {
         return try {
-            // Simple network check - ping Google DNS
-            Runtime.getRuntime().exec("ping -c 1 8.8.8.8").waitFor() == 0
+            // Try a lightweight Firestore operation as a connectivity check
+            database.disableNetwork() // Ensure we're testing actual network
+            database.enableNetwork()
+            true
         } catch (e: Exception) {
             false
         }
@@ -667,9 +748,12 @@ class ChatRepository @Inject constructor(
                                 val data = doc.data ?: emptyMap()
                                 val message = ChatMessage.fromFirestore(data)
 
-                                // Update local cache with latest status
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    cacheMessage(roomId, message)
+                                // IMPORTANT: Ensure status updates are properly handled
+                                if (message.status == MessageStatus.SEEN) {
+                                    // Update local cache with SEEN status
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        cacheMessage(roomId, message)
+                                    }
                                 }
                                 message
                             } catch (e: Exception) {
@@ -683,8 +767,7 @@ class ChatRepository @Inject constructor(
             }
 
         awaitClose { listener.remove() }
-    }
-    // Local Cache Operations
+    }    // Local Cache Operations
     suspend fun cacheMessage(roomId: String, message: ChatMessage) {
         try {
             chatMessageDao.insertMessage(message.toEntity(roomId))
@@ -885,4 +968,11 @@ class ChatRepository @Inject constructor(
             .await()
             .get("participants") as? List<String> ?: emptyList()
     }
+
+
+    interface ChatRepository {
+        suspend fun deleteChatroom(roomId: String)
+        // ... your other repository methods
+    }
+
 }

@@ -15,6 +15,7 @@ import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.util.*
 
 private const val CHATROOMS_COLLECTION = "chatrooms"
@@ -23,6 +24,8 @@ class ChatViewModel(
     private val repository: ChatRepository,
     private val chatRoomRepository: ChatRoomRepository,
     private val presenceRepository: PresenceRepository,
+
+
 ) : ViewModel() {
 
     private val _uploadResult = MutableStateFlow<CloudinaryUploadResponse?>(null)
@@ -51,6 +54,23 @@ class ChatViewModel(
     private val _isTyping = MutableStateFlow(false)
     private val _otherUserTyping = MutableStateFlow<Boolean>(false)
     val otherUserTyping: StateFlow<Boolean> = _otherUserTyping
+
+    init {
+        // ... existing code ...
+        setupStatusTracking()
+    }
+
+    private fun setupStatusTracking() {
+        viewModelScope.launch {
+            currentRoomId?.let { roomId ->
+                currentUserId?.let { userId ->
+                    repository.listenForMessageStatusUpdates(roomId, userId).collect { (messageId, status) ->
+                        updateMessageStatus(messageId, status)
+                    }
+                }
+            }
+        }
+    }
 
     init {
         Log.d("VM_LIFECYCLE", "ViewModel INITIALIZED - Hash: ${hashCode()}")
@@ -134,15 +154,15 @@ class ChatViewModel(
                 // Update last read timestamp
                 repository.updateLastReadTimestamp(roomId, userId, System.currentTimeMillis())
 
-                // Mark messages as seen
-                repository.markMessagesAsSeen(roomId, userId)
+                // Mark messages as read
+                repository.markMessagesAsRead(roomId, userId)
 
                 // Update UI
                 val currentState = _uiState.value
                 if (currentState is ChatUiState.Success) {
                     _uiState.value = currentState.copy(
                         messages = currentState.messages.map { message ->
-                            if (message.senderId == userId && message.status != MessageStatus.SEEN) {
+                            if (message.senderId != userId && message.status != MessageStatus.SEEN) {
                                 message.copy(status = MessageStatus.SEEN)
                             } else {
                                 message
@@ -155,6 +175,25 @@ class ChatViewModel(
             }
         }
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     fun handleNotificationDeepLink(roomId: String, currentUserId: String) {
         viewModelScope.launch {
             markMessagesAsRead(roomId, currentUserId)
@@ -166,18 +205,19 @@ class ChatViewModel(
         return chatRoomRepository.getUnreadCountFlow(roomId, userId)
     }
 
+    // Update the initializeChat function to properly handle message status updates
     fun initializeChat(roomId: String, currentUserId: String) {
         this.currentRoomId = roomId
         this.currentUserId = currentUserId
 
         viewModelScope.launch {
             try {
-                // Mark messages as read when opening chat
-                markMessagesAsRead(roomId, currentUserId)
-
-                // Rest of initialization...
+                // Get participants first
                 val participants = repository.getRoomParticipants(roomId)
                 otherUserId = participants.firstOrNull { it != currentUserId }
+
+                // Mark messages as read immediately
+                repository.markMessagesAsRead(roomId, currentUserId)
 
                 // Observe messages with status updates
                 repository.listenToMessages(roomId)
@@ -189,12 +229,23 @@ class ChatViewModel(
                             roomId = roomId,
                             typingUserId = if (_otherUserTyping.value) otherUserId else null
                         )
+
+                        // After updating messages, mark any unread ones as seen
+                        if (sortedMessages.any {
+                                it.senderId != currentUserId &&
+                                        it.status != MessageStatus.SEEN
+                            }) {
+                            repository.markMessagesAsRead(roomId, currentUserId)
+                        }
                     }
             } catch (e: Exception) {
                 _uiState.value = ChatUiState.Error("Error initializing chat: ${e.message}")
             }
         }
     }
+
+
+
     fun sendMessage(
         roomId: String,
         senderId: String,
@@ -224,6 +275,13 @@ class ChatViewModel(
                 )
                 // Add to UI immediately with SENDING status
                 updateMessages(newMessage)
+
+                // Check network before attempting to send
+                if (!repository.isNetworkAvailable()) {
+                    updateMessageStatus(newMessage.id, MessageStatus.FAILED)
+                    return@launch
+                }
+
 
                 repository.sendMessage(roomId, newMessage).onSuccess {
                     // Status will be updated by the snapshot listener
@@ -387,9 +445,96 @@ class ChatViewModel(
             }
         }
     }
+//for delete chatroom
+// In ChatViewModel.kt
+// In ChatViewModel.kt
+fun deleteChatroom(roomId: String) {
+    viewModelScope.launch {
+        try {
+            // 1. Get current state
+            val currentState = _uiState.value
+            val currentUserId = currentUserId ?: return@launch
 
+            // 2. Delete from Firestore
+            Firebase.firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .delete()
+                .await()
 
+            // 3. Delete all messages (batch operation)
+            val messages = Firebase.firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("messages")
+                .get()
+                .await()
 
+            val batch = Firebase.firestore.batch()
+            messages.documents.forEach { doc ->
+                batch.delete(doc.reference)
+            }
+            batch.commit().await()
+
+            // 4. Clear local cache
+            repository.clearRoomCache(roomId)
+
+            // 5. Update UI state - set to empty if this was the current room
+            if (currentState is ChatUiState.Success && currentState.roomId == roomId) {
+                _uiState.value = ChatUiState.Success(
+                    messages = emptyList(),
+                    currentUserId = currentUserId,
+                    roomId = roomId, // Keep same roomId to trigger recomposition
+                    typingUserId = null
+                )
+            }
+
+            // 6. Notify chat list to refresh
+            _refreshChatList.value = true
+
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "Delete error", e)
+            _uiState.value = ChatUiState.Error("Delete failed: ${e.message}")
+        }
+    }
+}
+
+    // Add this to your ViewModel's properties
+    private val _refreshChatList = MutableStateFlow(false)
+    val refreshChatList: StateFlow<Boolean> = _refreshChatList
+    private suspend fun sendDeletionNotification(roomId: String, senderId: String, recipientId: String) {
+        try {
+            // Get recipient's FCM token
+            val recipientToken = repository.getFcmToken(recipientId) ?: return
+
+            // Get sender's name
+            val senderName = Firebase.firestore.collection("users")
+                .document(senderId)
+                .get()
+                .await()
+                .getString("name") ?: senderId
+
+            // Prepare notification payload
+            val payload = mapOf(
+                "to" to recipientToken,
+                "notification" to mapOf(
+                    "title" to "Chat deleted",
+                    "body" to "$senderName deleted the chat",
+                    "click_action" to "FLUTTER_NOTIFICATION_CLICK"
+                ),
+                "data" to mapOf(
+                    "type" to "chat_deleted",
+                    "roomId" to roomId,
+                    "senderId" to senderId
+                )
+            )
+
+            // Send notification (you might want to send this to your backend instead)
+            Firebase.firestore.collection("notification_requests")
+                .add(payload)
+                .await()
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "Error sending deletion notification", e)
+        }
+    }
 
 }
 

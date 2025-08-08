@@ -107,6 +107,7 @@ class FirestoreChatRoomRepository @Inject constructor(
     private fun getRemoteChatRooms(userId: String): Flow<List<ChatRoom>> = callbackFlow {
         val listener = firestore.collection(CHATROOMS_COLLECTION)
             .whereArrayContains("participants", userId)
+            .whereEqualTo("isDeleted", false)
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) {
                     Log.e(TAG, "Error listening to chat rooms", error)
@@ -277,19 +278,19 @@ class FirestoreChatRoomRepository @Inject constructor(
 
     override suspend fun deleteRoom(roomId: String) {
         try {
+            // Mark as deleted in Firestore
             firestore.collection(CHATROOMS_COLLECTION)
                 .document(roomId)
-                .update(mapOf(
-                    "isDeleted" to true,
-                    "lastUpdated" to FieldValue.serverTimestamp()
-                ))
+                .update("isDeleted", true)
                 .await()
+
+            // Delete from local DB
+            chatRoomDao.deleteRoom(roomId)
         } catch (e: Exception) {
             Log.e(TAG, "Error deleting room", e)
             throw e
         }
     }
-
     override suspend fun restoreRoom(roomId: String) {
         try {
             firestore.collection(CHATROOMS_COLLECTION)
