@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.Flow
 interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages WHERE roomId = :roomId ORDER BY timestamp ASC")
     fun getMessagesByRoom(roomId: String): Flow<List<ChatMessageEntity>>
+    @Query("SELECT * FROM chat_messages WHERE roomId = :roomId ORDER BY timestamp ASC")
+    suspend fun getMessagesByRoomOnce(roomId: String): List<ChatMessageEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: ChatMessageEntity)
@@ -43,6 +45,9 @@ interface ChatMessageDao {
 
     @Query("SELECT * FROM chat_messages WHERE roomId = :roomId ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLatestMessage(roomId: String): ChatMessageEntity?
+
+    @Query("DELETE FROM chat_messages WHERE roomId = :roomId AND senderId = :userId")
+    suspend fun clearMessagesForUserInRoom(roomId: String, userId: String)
 
 
 }

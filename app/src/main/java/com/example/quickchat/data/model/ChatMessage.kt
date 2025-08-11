@@ -2,7 +2,6 @@ package com.example.quickchat.data.model
 
 import com.google.firebase.firestore.Exclude
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Serializer
 
 @Serializable
 data class ChatMessage(
@@ -11,14 +10,22 @@ data class ChatMessage(
     val senderId: String = "",
     val fcmToken: String = "",
     val imageUrl: String?,
+    val fileUrl: String? = null,
+    val isTemp: Boolean = false,
+    val thumbnailUrl: String? = null,
+    var fileName: String? = null,
+    var fileType: String? = null,
+    var fileSize: Long? = null,
+    val uploadProgress: Float? = null,
     val messageType: MessageType = MessageType.TEXT,
     val timestamp: Long = System.currentTimeMillis(),
     val isSystemMessage: Boolean = false,
     val clientGeneratedId: String = "",
     val isRead: Boolean = false,
     val status: MessageStatus = MessageStatus.SENDING,
-    val retryCount: Int? = 0,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val retryCount: Int = 0,
+    val lastUpdated: Long = System.currentTimeMillis(),
+
 ) {
     @Exclude
     fun toFirestoreMap(): Map<String, Any?> {
@@ -34,7 +41,14 @@ data class ChatMessage(
             "isRead" to isRead,
             "status" to status.name,
             "retryCount" to retryCount,
-            "lastUpdated" to lastUpdated
+            "lastUpdated" to lastUpdated,
+            "fileUrl" to fileUrl,
+            "thumbnailUrl" to thumbnailUrl,
+            "fileName" to fileName,
+            "fileType" to fileType,
+            "fileSize" to fileSize,
+            "uploadProgress" to uploadProgress,
+            "isTemp" to isTemp,
         )
     }
 
@@ -52,7 +66,14 @@ data class ChatMessage(
                 isRead = map["isRead"] as? Boolean ?: false,
                 status = MessageStatus.valueOf(map["status"] as? String ?: "SENDING"),
                 retryCount = map["retryCount"] as? Int ?: 0,
-                lastUpdated = map["lastUpdated"] as? Long ?: System.currentTimeMillis()
+                lastUpdated = map["lastUpdated"] as? Long ?: System.currentTimeMillis(),
+                thumbnailUrl = map["thumbnailUrl"] as? String,
+                fileName = map["fileName"] as? String,
+                fileType = map["fileType"] as? String,
+                fileSize = (map["fileSize"] as? Number)?.toLong(),
+                uploadProgress = (map["uploadProgress"] as? Number)?.toFloat(),
+                isTemp = map["isTemp"] as? Boolean ?: false
+
 
             )
         }
@@ -62,10 +83,32 @@ data class ChatMessage(
 enum class MessageType {
     TEXT,
     IMAGE,
+    PDF,
+    AUDIO,
     VIDEO,
-    FILE
+    FILE;
+
+    companion object {
+        fun fromString(value: String?): MessageType {
+            return try {
+                valueOf(value ?: "TEXT")
+            } catch (e: IllegalArgumentException) {
+                FILE // Default fallback for unknown types
+            }
+        }
+    }
+
 }
 @Serializable
 enum class MessageStatus {
-    SENDING, SENT, DELIVERED, SEEN, FAILED
+    SENDING, SENT, DELIVERED, SEEN, FAILED;
+    companion object {
+        fun fromString(value: String?): MessageStatus {
+            return try {
+                valueOf(value ?: "SENDING")
+            } catch (e: IllegalArgumentException) {
+                SENDING // Default fallback
+            }
+        }
+    }
 }

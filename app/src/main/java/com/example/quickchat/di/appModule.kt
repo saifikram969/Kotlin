@@ -9,6 +9,8 @@ import com.example.quickchat.data.repository.PresenceRepository
 import com.example.quickchat.data.repository.PresenceRepositoryImpl
 import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
+import com.example.quickchat.utils.ConnectivityObserver
+import com.example.quickchat.utils.NetworkConnectivityObserver
 import com.google.firebase.firestore.FirebaseFirestore
 import org.koin.android.ext.koin.androidApplication
 import org.koin.core.module.dsl.viewModel
@@ -37,6 +39,10 @@ val appModule = module {
                 AppDatabase.MIGRATION_11_12,
                 AppDatabase.MIGRATION_12_13,
                 AppDatabase.MIGRATION_13_14,
+                AppDatabase.MIGRATION_14_15,
+                AppDatabase.MIGRATION_15_16,
+                AppDatabase.MIGRATION_16_17,
+                AppDatabase.MIGRATION_17_18,
             )
         .fallbackToDestructiveMigration() // Keep for development
         .build()
@@ -49,20 +55,16 @@ val appModule = module {
     // Repository Bindings
     single<ChatRoomRepository> { FirestoreChatRoomRepository(firestore = get(), chatRoomDao = get()) }
 
+
     // ChatRepository with both Firestore and Room DAO
     single { ChatRepository(get(), get()) }
+    single<ConnectivityObserver> { NetworkConnectivityObserver(get()) }
 
-    single<PresenceRepository> {
-        PresenceRepositoryImpl(
-            firestore = get()
-        )
-    }
+    single<PresenceRepository> { PresenceRepositoryImpl(firestore = get()) }
 
 
-
-
-// provide viewMOdel
-    viewModel { ChatViewModel(get(), get(),get()) }
+    // provide viewMOdel
+    viewModel { ChatViewModel(get(), get(),get(),get()) }
 
     // Add ChatRoomListViewModel
     viewModel { (userId: String) -> ChatRoomListViewModel(repository = get(), chatRepository = get(), userId = userId) }

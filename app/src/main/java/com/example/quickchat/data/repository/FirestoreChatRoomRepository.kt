@@ -14,9 +14,18 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.days
 
 private const val TAG = "FirestoreChatRoomRepo"
 private const val CHATROOMS_COLLECTION = "chatrooms"
@@ -26,26 +35,32 @@ class FirestoreChatRoomRepository @Inject constructor(
     private val chatRoomDao: ChatRoomDao
 ) : ChatRoomRepository {
 
+    // In FirestoreChatRoomRepository.kt
     override fun getChatRooms(userId: String): Flow<List<ChatRoom>> {
         return callbackFlow {
-            // First try to get from local cache immediately
-            launch {
-                chatRoomDao.getChatRooms(userId).collect { localRooms ->
-                    val filteredLocal = localRooms.filter { !it.isArchived }
-                    if (filteredLocal.isNotEmpty()) {
-                        trySend(filteredLocal)
-                    }
+            // Always emit from local DB first
+            chatRoomDao.getChatRooms(userId)
+                .first()
+                .let { trySend(it) }
+
+            // Merge with remote updates
+            merge(
+                chatRoomDao.getChatRooms(userId),
+                getRemoteChatRooms(userId)
+            )
+                .collect { rooms ->
+                    trySend(rooms.filter {
+                        !it.isArchived &&
+                                !it.isDeleted &&
+                                it.participants.contains(userId)
+                    })
                 }
-            }
-            // Then get from remote and update
-            getRemoteChatRooms(userId).collect { remoteRooms ->
-                val filteredRemote = remoteRooms.filter { !it.isArchived }
-                trySend(filteredRemote)
-            }
         }
     }
 
-     suspend fun addFcmTokenToRoom(roomId: String, userId: String, token: String) {
+
+
+    suspend fun addFcmTokenToRoom(roomId: String, userId: String, token: String) {
         try {
             val updateMap = mapOf(
                 "fcmTokens.$userId" to token,
@@ -107,46 +122,35 @@ class FirestoreChatRoomRepository @Inject constructor(
     private fun getRemoteChatRooms(userId: String): Flow<List<ChatRoom>> = callbackFlow {
         val listener = firestore.collection(CHATROOMS_COLLECTION)
             .whereArrayContains("participants", userId)
-            .whereEqualTo("isDeleted", false)
             .addSnapshotListener { snapshot, error ->
-                if (error != null || snapshot == null) {
-                    Log.e(TAG, "Error listening to chat rooms", error)
+                if (error != null) {
+                    Log.e(TAG, "Firestore error", error)
                     trySend(emptyList())
                     return@addSnapshotListener
                 }
 
+                // Launch a coroutine to handle the database operation
                 CoroutineScope(Dispatchers.IO).launch {
-                    val rooms = snapshot.documents.mapNotNull { doc ->
+                    val rooms = snapshot?.documents?.mapNotNull { doc ->
                         try {
-                            val data = doc.data ?: emptyMap()
-                            val participants = data["participants"] as? List<String> ?: emptyList()
-
-                            // Ensure the current user is actually in participants
-                            if (participants.contains(userId)) {
-                                createChatRoomFromDocument(doc, userId)
-                            } else {
-                                null
-                            }
+                            val room = createChatRoomFromDocument(doc, userId)
+                            // Update local DB in the coroutine
+                            chatRoomDao.insertAll(listOf(room))
+                            room
                         } catch (e: Exception) {
-                            Log.e(TAG, "Error parsing chat room document", e)
+                            Log.e(TAG, "Error processing room document", e)
                             null
                         }
-                    }
-
-                    try {
-                        chatRoomDao.insertAll(rooms)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error updating local cache", e)
-                    }
+                    } ?: emptyList()
 
                     trySend(rooms)
                 }
             }
 
-        awaitClose { (listener as ListenerRegistration).remove() }
+        awaitClose { listener.remove() }
     }
 
-    private suspend fun createChatRoomFromDocument(
+    fun createChatRoomFromDocument(
         doc: DocumentSnapshot,
         userId: String
     ): ChatRoom {
@@ -195,6 +199,30 @@ class FirestoreChatRoomRepository @Inject constructor(
             throw e
         }
     }
+
+
+    override suspend fun syncRoomsWithFirestore(userId: String) {
+        try {
+            // Force a fresh fetch from Firestore
+            val remoteRooms = firestore.collection(CHATROOMS_COLLECTION)
+                .whereArrayContains("participants", userId)
+                .get()
+                .await()
+                .documents
+                .mapNotNull { doc -> createChatRoomFromDocument(doc, userId) }
+
+            // Update local database
+            chatRoomDao.insertAll(remoteRooms)
+        } catch (e: Exception) {
+            Log.e(TAG, "Sync failed", e)
+            throw e
+        }
+    }
+
+
+
+
+
 
     override suspend fun createChatRoom(user1: String, user2: String): Result<String> {
         return try {
@@ -281,16 +309,21 @@ class FirestoreChatRoomRepository @Inject constructor(
             // Mark as deleted in Firestore
             firestore.collection(CHATROOMS_COLLECTION)
                 .document(roomId)
-                .update("isDeleted", true)
+                .update(mapOf(
+                    "isDeleted" to true,
+                    "lastUpdated" to FieldValue.serverTimestamp()
+                ))
                 .await()
 
             // Delete from local DB
             chatRoomDao.deleteRoom(roomId)
         } catch (e: Exception) {
-            Log.e(TAG, "Error deleting room", e)
+            Log.e(TAG, "Error deleting room $roomId", e)
             throw e
         }
     }
+
+
     override suspend fun restoreRoom(roomId: String) {
         try {
             firestore.collection(CHATROOMS_COLLECTION)
@@ -300,12 +333,13 @@ class FirestoreChatRoomRepository @Inject constructor(
                     "lastUpdated" to FieldValue.serverTimestamp()
                 ))
                 .await()
+
+            // No need to update local DB here as the Firestore listener will handle it
         } catch (e: Exception) {
-            Log.e(TAG, "Error restoring room", e)
+            Log.e(TAG, "Error restoring room $roomId", e)
             throw e
         }
     }
-
     override suspend fun incrementUnreadCount(roomId: String, userId: String) {
         try {
             Log.d("UNREAD_DEBUG", "⏩ Starting incrementUnreadCount for room $roomId, user $userId")
@@ -430,6 +464,68 @@ class FirestoreChatRoomRepository @Inject constructor(
         }
     }
 
+
+// link with jpin user
+// Add these to FirestoreChatRoomRepository.kt
+override suspend fun generateInviteLink(roomId: String, creatorId: String): String {
+    // Verify creator is admin of the chatroom
+    val room = firestore.collection(CHATROOMS_COLLECTION)
+        .document(roomId)
+        .get()
+        .await()
+
+    val admins = room.get("admins") as? List<String> ?: emptyList()
+    if (!admins.contains(creatorId)) {
+        throw Exception("Only admins can generate invites")
+    }
+
+
+    val token = UUID.randomUUID().toString()
+    val expiresAt = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(7) // 1 week expiry
+    firestore.collection("chatroom_invites")
+        .document(roomId)
+        .set(mapOf(
+            "token" to token,
+            "expiresAt" to expiresAt,
+            "creatorId" to creatorId,
+            "createdAt" to FieldValue.serverTimestamp()
+        ))
+
+    return "https://yourapp.com/join/$roomId?token=$token"
+}
+
+    override suspend fun joinChatroomViaLink(roomId: String, token: String, userId: String): Boolean {
+        return try {
+            // Verify the invite
+            val invite = firestore.collection("chatroom_invites")
+                .document(roomId)
+                .get()
+                .await()
+
+            if (invite.getString("token") != token ||
+                invite.getLong("expiresAt")!! < System.currentTimeMillis()) {
+                return false
+            }
+
+            // Add user to participants
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .update("participants", FieldValue.arrayUnion(userId))
+                .await()
+
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error joining chatroom via link", e)
+            false
+        }
+    }
+
+    override suspend fun revokeInviteLink(roomId: String) {
+        firestore.collection("chatroom_invites")
+            .document(roomId)
+            .delete()
+            .await()
+    }
 
 
 }

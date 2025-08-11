@@ -1,3 +1,4 @@
+
 <resources>
     <string name="app_name">QuickChat</string>
     <string name="chat_rooms">Chat Rooms</string>
@@ -6,4 +7,7 @@
     <string name="retry">Retry</string>
     <string name="unknown_error">Unknown error occurred</string>
     <string name="no_chat_rooms">No chat rooms available</string>
+    <string name="share_chatroom">Share Chatroom</string>
+    <string name="generate_link">Generate Link</string>
+    <string name="share_link_message">Generate a shareable link for this chatroom?</string>
 </resources>

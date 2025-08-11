@@ -1,6 +1,9 @@
 package com.example.quickchat.presentation.viewmodel
 
+import android.R.id.message
 import android.util.Log
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.quickchat.data.model.ChatMessage
@@ -9,6 +12,7 @@ import com.example.quickchat.data.model.MessageType
 import com.example.quickchat.data.repository.ChatRepository
 import com.example.quickchat.data.repository.ChatRoomRepository
 import com.example.quickchat.data.repository.PresenceRepository
+import com.example.quickchat.utils.ConnectivityObserver
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.firestore
@@ -24,7 +28,7 @@ class ChatViewModel(
     private val repository: ChatRepository,
     private val chatRoomRepository: ChatRoomRepository,
     private val presenceRepository: PresenceRepository,
-
+    private val connectivityObserver: ConnectivityObserver
 
 ) : ViewModel() {
 
@@ -46,27 +50,68 @@ class ChatViewModel(
     private val _presenceStatus = MutableStateFlow<Boolean?>(null)
     val presenceStatus: StateFlow<Boolean?> = _presenceStatus
 
+    private val _messages = mutableStateListOf<ChatMessage>()
+    val messages: List<ChatMessage> get() = _messages
+
+    private val _uploadingMessages = mutableStateMapOf<String, ChatMessage>()
+    val uploadingMessages: Map<String, ChatMessage> get() = _uploadingMessages
+
     private var currentRoomId: String? = null
     private var currentUserId: String? = null
     private var otherUserId: String? = null
 
-    // Typing status tracking
-    private val _isTyping = MutableStateFlow(false)
+     private val _isTyping = MutableStateFlow(false)
     private val _otherUserTyping = MutableStateFlow<Boolean>(false)
     val otherUserTyping: StateFlow<Boolean> = _otherUserTyping
 
+    private val _tempMessages = mutableStateListOf<ChatMessage>()
+    val tempMessages: List<ChatMessage> get() = _tempMessages
+
+
+
     init {
-        // ... existing code ...
         setupStatusTracking()
     }
+
+    private val _networkStatus = MutableStateFlow(true)
+    val networkStatus: StateFlow<Boolean> = _networkStatus
+
+    init {
+        observeNetworkStatus()
+    }
+
+    private fun observeNetworkStatus() {
+        viewModelScope.launch {
+            connectivityObserver.observe().collect { isConnected ->
+                _networkStatus.value = isConnected
+                if (isConnected) {
+                    currentRoomId?.let { roomId ->
+                        repository.syncMissingMessages(roomId)
+                        retryFailedMessages(roomId)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun retryFailedMessages(roomId: String) {
+        val failedMessages = repository.getFailedMessages(roomId)
+        failedMessages.forEach { message ->
+            repository.sendMessageWithOfflineSupport(roomId, message.copy(
+                timestamp = System.currentTimeMillis()
+            ))
+        }
+    }
+
 
     private fun setupStatusTracking() {
         viewModelScope.launch {
             currentRoomId?.let { roomId ->
                 currentUserId?.let { userId ->
-                    repository.listenForMessageStatusUpdates(roomId, userId).collect { (messageId, status) ->
-                        updateMessageStatus(messageId, status)
-                    }
+                    repository.listenForMessageStatusUpdates(roomId, userId)
+                        .collect { (messageId, status) ->
+                            updateMessageStatus(messageId, status)
+                        }
                 }
             }
         }
@@ -92,14 +137,12 @@ class ChatViewModel(
 
     fun observePresence(userId: String) {
         viewModelScope.launch {
-            // 1. Validate user ID first
             if (userId.isBlank()) {
                 Log.e("ChatViewModel", "Cannot observe presence - empty user ID")
                 _presenceStatus.value = null
                 return@launch
             }
 
-            // 2. Observe presence with proper error handling
             presenceRepository.observeUserPresence(userId)
                 .onStart {
                     Log.d("ChatViewModel", "Starting presence observation for user: $userId")
@@ -110,13 +153,16 @@ class ChatViewModel(
                     _presenceStatus.value = null
                 }
                 .collect { isOnline ->
-                    Log.d("ChatViewModel", "Presence update for $userId: ${if (isOnline) "online" else "offline"}")
+                    Log.d(
+                        "ChatViewModel",
+                        "Presence update for $userId: ${if (isOnline) "online" else "offline"}"
+                    )
                     _presenceStatus.value = isOnline
 
                     // Update UI state if needed
                     _uiState.update { currentState ->
                         if (currentState is ChatUiState.Success) {
-                            currentState.copy() // You can add presence info here if needed
+                            currentState.copy()
                         } else {
                             currentState
                         }
@@ -124,6 +170,7 @@ class ChatViewModel(
                 }
         }
     }
+
     fun updatePresence(userId: String, isOnline: Boolean) {
         viewModelScope.launch {
             presenceRepository.updateUserPresence(userId, isOnline)
@@ -151,13 +198,10 @@ class ChatViewModel(
     fun markMessagesAsRead(roomId: String, userId: String) {
         viewModelScope.launch {
             try {
-                // Update last read timestamp
                 repository.updateLastReadTimestamp(roomId, userId, System.currentTimeMillis())
 
-                // Mark messages as read
                 repository.markMessagesAsRead(roomId, userId)
 
-                // Update UI
                 val currentState = _uiState.value
                 if (currentState is ChatUiState.Success) {
                     _uiState.value = currentState.copy(
@@ -176,24 +220,6 @@ class ChatViewModel(
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fun handleNotificationDeepLink(roomId: String, currentUserId: String) {
         viewModelScope.launch {
             markMessagesAsRead(roomId, currentUserId)
@@ -205,96 +231,144 @@ class ChatViewModel(
         return chatRoomRepository.getUnreadCountFlow(roomId, userId)
     }
 
-    // Update the initializeChat function to properly handle message status updates
     fun initializeChat(roomId: String, currentUserId: String) {
         this.currentRoomId = roomId
         this.currentUserId = currentUserId
 
         viewModelScope.launch {
-            try {
-                // Get participants first
-                val participants = repository.getRoomParticipants(roomId)
-                otherUserId = participants.firstOrNull { it != currentUserId }
+            _uiState.value = ChatUiState.Loading
 
-                // Mark messages as read immediately
-                repository.markMessagesAsRead(roomId, currentUserId)
+            val cachedMessages = repository.getCachedMessages(roomId)
+            if (cachedMessages.isNotEmpty()) {
+                _uiState.value = ChatUiState.Success(
+                    messages = cachedMessages,
+                    currentUserId = currentUserId,
+                    roomId = roomId
+                )
+            }
 
-                // Observe messages with status updates
-                repository.listenToMessages(roomId)
-                    .collect { messages ->
-                        val sortedMessages = messages.sortedBy { it.timestamp }
+            if (networkStatus.value == true) {
+                try {
+                    repository.syncMissingMessages(roomId)
+                    val updatedMessages = repository.getCachedMessages(roomId)
+                    _uiState.value = if (updatedMessages.isNotEmpty()) {
+                        ChatUiState.Success(
+                            messages = updatedMessages,
+                            currentUserId = currentUserId,
+                            roomId = roomId
+                        )
+                    } else {
+                        ChatUiState.Error("No messages found")
+                    }
+                } catch (e: Exception) {
+                    Log.e("ChatVM", "Sync failed", e)
+                    if (cachedMessages.isNotEmpty()) {
                         _uiState.value = ChatUiState.Success(
-                            messages = sortedMessages,
+                            messages = cachedMessages,
                             currentUserId = currentUserId,
                             roomId = roomId,
-                            typingUserId = if (_otherUserTyping.value) otherUserId else null
+                            isOffline = true
                         )
-
-                        // After updating messages, mark any unread ones as seen
-                        if (sortedMessages.any {
-                                it.senderId != currentUserId &&
-                                        it.status != MessageStatus.SEEN
-                            }) {
-                            repository.markMessagesAsRead(roomId, currentUserId)
-                        }
+                    } else {
+                        _uiState.value = ChatUiState.Error(
+                            "Offline: No cached messages available"
+                        )
                     }
-            } catch (e: Exception) {
-                _uiState.value = ChatUiState.Error("Error initializing chat: ${e.message}")
+                }
+            } else if (cachedMessages.isEmpty()) {
+                _uiState.value = ChatUiState.Error(
+                    "Offline: No cached messages available"
+                )
+            }
+
+            if (networkStatus.value == true) {
+                repository.listenToMessages(roomId).collect { messages ->
+                    _uiState.value = ChatUiState.Success(
+                        messages = messages.sortedBy { it.timestamp },
+                        currentUserId = currentUserId,
+                        roomId = roomId
+                    )
+                }
             }
         }
     }
 
+    fun addUploadingMessage(message: ChatMessage) {
+        _uploadingMessages[message.id] = message
+    }
 
+    fun updateUploadingMessage(
+        messageId: String,
+        fileUrl: String? = null,
+        status: MessageStatus? = null,
+        uploadProgress: Float? = null
+    ) {
+        _uploadingMessages[messageId]?.let { existing ->
+            _uploadingMessages[messageId] = existing.copy(
+                fileUrl = fileUrl ?: existing.fileUrl,
+                status = status ?: existing.status,
+                uploadProgress = uploadProgress ?: existing.uploadProgress
+            )
+        }
+    }
+
+    fun removeUploadingMessage(messageId: String) {
+        _uploadingMessages.remove(messageId)
+    }
 
     fun sendMessage(
         roomId: String,
         senderId: String,
         text: String? = null,
         imageUrl: String? = null,
-        thumbnailUrl: String? = null
+        thumbnailUrl: String? = null,
+        fileUrl: String? = null,
+        fileType: String? = null,
+        fileName: String? = null,
+        fileSize: Long? = null
     ) {
+        Log.d("SendMessage", " sendMessage called → roomId=$roomId, senderId=$senderId")
+        Log.d("SendMessage", "Parameters → text=$text, imageUrl=$imageUrl, fileUrl=$fileUrl, fileType=$fileType, fileName=$fileName, fileSize=$fileSize")
+
         viewModelScope.launch {
-            try {
-                // Ensure typing status is set to false when sending message
-                updateTypingStatus(roomId, senderId, false)
-                _isTyping.value = false
-
-                val messageType = when {
-                    !imageUrl.isNullOrEmpty() -> MessageType.IMAGE
-                    else -> MessageType.TEXT
+            val messageType = when {
+                !imageUrl.isNullOrBlank() -> MessageType.IMAGE
+                !fileUrl.isNullOrBlank() -> when {
+                    fileType?.startsWith("audio/") == true -> MessageType.AUDIO
+                    fileType?.startsWith("application/pdf") == true -> MessageType.PDF
+                    else -> MessageType.FILE
                 }
-
-                val newMessage = createMessage(
-                    senderId = senderId,
-                    text = text ?: "",
-                    messageType = messageType
-                ).copy(
-                    imageUrl = imageUrl,
-                    status = MessageStatus.SENDING // Start with SENDING status
-
-                )
-                // Add to UI immediately with SENDING status
-                updateMessages(newMessage)
-
-                // Check network before attempting to send
-                if (!repository.isNetworkAvailable()) {
-                    updateMessageStatus(newMessage.id, MessageStatus.FAILED)
-                    return@launch
-                }
-
-
-                repository.sendMessage(roomId, newMessage).onSuccess {
-                    // Status will be updated by the snapshot listener
-                }.onFailure { e ->
-                    updateMessageStatus(newMessage.id, MessageStatus.FAILED)
-                    Log.e("SEND_ERROR", "Failed to send message", e)
-                }
-            } catch (e: Exception) {
-                Log.e("SEND_ERROR", "Unexpected error sending message", e)
+                else -> MessageType.TEXT
             }
+            Log.d("SendMessage", "📄 Determined messageType=$messageType")
+
+            val message = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                text = text ?: "",
+                senderId = senderId,
+                timestamp = System.currentTimeMillis(),
+                status = MessageStatus.SENDING,
+                messageType = messageType,
+                imageUrl = imageUrl,
+                thumbnailUrl = thumbnailUrl,
+                fileUrl = fileUrl,
+                fileType = fileType ?: "",
+                fileName = fileName ?: "",
+                fileSize = fileSize
+            )
+            Log.d("SendMessage", " Created ChatMessage object: $message")
+            updateMessages(message)
+
+            repository.sendMessageWithOfflineSupport(roomId, message)
+                .onSuccess {
+                    updateMessageStatus(message.id, MessageStatus.SENT)
+                }
+                .onFailure { e ->
+                    updateMessageStatus(message.id, MessageStatus.FAILED)
+                }
         }
     }
-
+    
     private fun createMessage(
         senderId: String,
         text: String,
@@ -362,35 +436,31 @@ class ChatViewModel(
     }
 
     private fun updateMessages(newMessage: ChatMessage) {
-        val state = _uiState.value
-        if (state is ChatUiState.Success) {
-            _uiState.value = state.copy(
-                messages = (state.messages + newMessage)
-                    .distinctBy { it.id }
-                    .sortedBy { it.timestamp }
-            )
+        _uiState.update { current ->
+            if (current is ChatUiState.Success) {
+                current.copy(
+                    messages = (current.messages + newMessage)
+                        .distinctBy { it.id }
+                        .sortedBy { it.timestamp }
+                )
+            } else current
         }
     }
-
-    // In ChatViewModel
     private fun updateMessageStatus(messageId: String, status: MessageStatus) {
-        _uiState.update { currentState ->
-            if (currentState is ChatUiState.Success) {
-                val updatedMessages = currentState.messages.map {
-                    if (it.id == messageId) it.copy(status = status) else it
-                }
-                currentState.copy(messages = updatedMessages)
-            } else {
-                currentState
-            }
+        _uiState.update { current ->
+            if (current is ChatUiState.Success) {
+                current.copy(
+                    messages = current.messages.map {
+                        if (it.id == messageId) it.copy(status = status) else it
+                    }
+                )
+            } else current
         }
 
-        // Update in local database
         viewModelScope.launch {
             repository.updateMessageStatus(messageId, status)
         }
     }
-
     fun setTypingStatus(isTyping: Boolean) {
         currentRoomId?.let { roomId ->
             currentUserId?.let { userId ->
@@ -416,91 +486,70 @@ class ChatViewModel(
 
         typingRef.set(data)
     }
+
     fun enterChatRoom(userId: String) {
         viewModelScope.launch {
             presenceRepository.updateUserPresence(userId, true)
         }
     }
 
-
-
-
-
-    // In ChatViewModel
     fun onNetworkRestored(roomId: String) {
         viewModelScope.launch {
-            // 1. First sync any message gaps
             repository.syncMessageGaps(roomId)
 
-            // 2. Get all failed messages
             val failedMessages = repository.getFailedMessages(roomId)
 
-            // 3. Retry each with exponential backoff
             failedMessages.forEachIndexed { index, message ->
                 launch {
-                    // Exponential backoff: 1s, 2s, 4s, etc.
                     delay((1L shl index.coerceAtMost(5)) * 1000)
                     retryMessage(roomId, message)
                 }
             }
         }
     }
-//for delete chatroom
-// In ChatViewModel.kt
-// In ChatViewModel.kt
-fun deleteChatroom(roomId: String) {
-    viewModelScope.launch {
-        try {
-            // 1. Get current state
-            val currentState = _uiState.value
-            val currentUserId = currentUserId ?: return@launch
 
-            // 2. Delete from Firestore
-            Firebase.firestore.collection(CHATROOMS_COLLECTION)
-                .document(roomId)
-                .delete()
-                .await()
+    fun deleteChatroom(roomId: String, onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                // 1. Mark as deleted in Firestore
+                Firebase.firestore.collection(CHATROOMS_COLLECTION)
+                    .document(roomId)
+                    .update(
+                        mapOf(
+                            "isDeleted" to true,
+                            "lastUpdated" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    .await()
 
-            // 3. Delete all messages (batch operation)
-            val messages = Firebase.firestore.collection(CHATROOMS_COLLECTION)
-                .document(roomId)
-                .collection("messages")
-                .get()
-                .await()
+                // 2. Clear local cache
+                repository.clearRoomCache(roomId)
 
-            val batch = Firebase.firestore.batch()
-            messages.documents.forEach { doc ->
-                batch.delete(doc.reference)
+                // 3. Update UI state - changed from Empty to Loading
+                if (_uiState.value is ChatUiState.Success &&
+                    (_uiState.value as ChatUiState.Success).roomId == roomId
+                ) {
+                    _uiState.value = ChatUiState.Loading
+                }
+                _refreshChatList.value = true
+
+                onComplete()
+
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Delete error", e)
+                _uiState.value = ChatUiState.Error("Delete failed: ${e.message}")
             }
-            batch.commit().await()
-
-            // 4. Clear local cache
-            repository.clearRoomCache(roomId)
-
-            // 5. Update UI state - set to empty if this was the current room
-            if (currentState is ChatUiState.Success && currentState.roomId == roomId) {
-                _uiState.value = ChatUiState.Success(
-                    messages = emptyList(),
-                    currentUserId = currentUserId,
-                    roomId = roomId, // Keep same roomId to trigger recomposition
-                    typingUserId = null
-                )
-            }
-
-            // 6. Notify chat list to refresh
-            _refreshChatList.value = true
-
-        } catch (e: Exception) {
-            Log.e("ChatViewModel", "Delete error", e)
-            _uiState.value = ChatUiState.Error("Delete failed: ${e.message}")
         }
     }
-}
 
     // Add this to your ViewModel's properties
     private val _refreshChatList = MutableStateFlow(false)
     val refreshChatList: StateFlow<Boolean> = _refreshChatList
-    private suspend fun sendDeletionNotification(roomId: String, senderId: String, recipientId: String) {
+    private suspend fun sendDeletionNotification(
+        roomId: String,
+        senderId: String,
+        recipientId: String
+    ) {
         try {
             // Get recipient's FCM token
             val recipientToken = repository.getFcmToken(recipientId) ?: return
@@ -536,6 +585,97 @@ fun deleteChatroom(roomId: String) {
         }
     }
 
+    // delete user in chatroom with all chats deleted
+    fun deleteChatroomForUser(
+        roomId: String,
+        userId: String,
+        onComplete: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                // 1. Remove the user from participants
+                Firebase.firestore.collection(CHATROOMS_COLLECTION)
+                    .document(roomId)
+                    .update(
+                        mapOf(
+                            "participants" to FieldValue.arrayRemove(userId),
+                            "lastUpdated" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    .await()
+
+                // Delete all messages sent by this user
+                deleteUserMessages(roomId, userId)
+
+                // Clear from local DB (both room + messages)
+                repository.clearRoomCache(roomId)
+                repository.clearMessagesForUserInRoom(
+                    roomId,
+                    userId
+                )
+                onComplete()
+
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Error leaving chatroom", e)
+                _uiState.value = ChatUiState.Error("Failed to leave chatroom: ${e.message}")
+            }
+        }
+    }
+
+    fun addTempMessage(message: ChatMessage) {
+        _tempMessages.add(message.copy(isTemp = true))
+        updateMessages(message.copy(isTemp = true))
+    }
+
+    fun updateTempMessage(
+        messageId: String,
+        fileUrl: String? = null,
+        status: MessageStatus,
+        isTemp: Boolean = false,
+        uploadProgress: Float? = null
+    ) {
+        _tempMessages.replaceAll { msg ->
+            if (msg.id == messageId) msg.copy(
+                fileUrl = fileUrl,
+                status = status,
+                uploadProgress = uploadProgress
+            ) else msg
+        }
+
+        _uiState.update { current ->
+            if (current is ChatUiState.Success) {
+                current.copy(messages = current.messages.map {
+                    if (it.id == messageId) it.copy(
+                        fileUrl = fileUrl,
+                        status = status,
+                        uploadProgress = uploadProgress
+                    ) else it
+                })
+            } else current
+        }
+    }
+    
+    fun removeTempMessage(messageId: String) {
+        _tempMessages.removeAll { it.id == messageId }
+    }
+    
+    private suspend fun deleteUserMessages(roomId: String, userId: String) {
+        val messagesSnapshot = Firebase.firestore.collection(CHATROOMS_COLLECTION)
+            .document(roomId)
+            .collection("messages")
+            .whereEqualTo("senderId", userId)
+            .get()
+            .await()
+
+        if (messagesSnapshot.isEmpty) return
+
+        val batch = Firebase.firestore.batch()
+        for (doc in messagesSnapshot.documents) {
+            batch.delete(doc.reference)
+        }
+        batch.commit().await()
+    }
+    
 }
 
 sealed class ChatUiState {
@@ -545,7 +685,8 @@ sealed class ChatUiState {
         val messages: List<ChatMessage>,
         val currentUserId: String,
         val roomId: String,
-        val typingUserId: String? = null
+        val typingUserId: String? = null,
+        val isOffline: Boolean = false
     ) : ChatUiState()
 
     data class Error(val message: String) : ChatUiState()

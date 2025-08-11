@@ -9,12 +9,14 @@ data class ChatRoom(
     @PrimaryKey
     val roomId: String,
     val name: String,
-    val lastMessage: String?,
-    val lastTimestamp: Long,
-    val unreadCount: Int,
+    val lastMessage: String? = null,
+    val lastTimestamp: Long = 0L,
+    val unreadCount: Int = 0,
     val userId: String,
     val participants: List<String> = emptyList(),
     val lastRead: Long = 0L,
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val isLocal: Boolean = false,
     val isArchived: Boolean = false,
     val isDeleted: Boolean = false,
     val isMuted: Boolean = false,
@@ -34,6 +36,7 @@ fun toFirestoreMap(): Map<String, Any> {
         "isMuted" to isMuted,
         "fcmTokens" to fcmTokens
     )
+
 
     // Add lastRead fields for all participants
     participants.forEach { userId ->

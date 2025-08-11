@@ -1,4 +1,5 @@
 package com.example.quickchat.presentation.ChatRoomListScreen
+import android.util.Log
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -33,6 +34,7 @@ import com.example.quickchat.R
 import com.example.quickchat.data.model.ChatRoom
 import com.example.quickchat.presentation.component.CreateRoomBottomSheet
 import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
+import com.google.firebase.firestore.BuildConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -50,16 +52,34 @@ fun ChatRoomListScreen(
     onBackClick: () -> Unit,
     viewModel: ChatRoomListViewModel = koinViewModel(parameters = { parametersOf(userId) })
 ) {
+    // Add debug logging
+    LaunchedEffect(Unit) {
+        viewModel.fetchChatRooms(true) // Force initial refresh
+    }
+
+
+
+
     val rooms by viewModel.chatRooms.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val creationState by viewModel.roomCreationState.collectAsState()
+
     val showUndo by viewModel.showUndo.collectAsState()
+    val shareLinkState by viewModel.shareLinkState.collectAsState()
+
+// Add this to track if rooms have been loaded at least once
+    var isInitialLoad by remember { mutableStateOf(true) }
+
     // Existing state declarations...
     var showCreateRoomSheet by remember { mutableStateOf(false) }
     var newChatUsername by remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var showShareDialog by remember { mutableStateOf(false) }
+    var selectedRoomId by remember { mutableStateOf("") }
+
+
 
     // Handle undo action
     LaunchedEffect(showUndo) {
@@ -76,8 +96,6 @@ fun ChatRoomListScreen(
         }
     }
 
-    // Handle room creation state changes
-    // Handle room creation state changes
     // Handle room creation state changes
     LaunchedEffect(creationState) {
         when (creationState) {
@@ -101,9 +119,30 @@ fun ChatRoomListScreen(
             else -> {}
         }
     }
-    LaunchedEffect(Unit) {
-        viewModel.fetchChatRooms()
+    when {
+        isLoading && rooms.isEmpty() -> FullScreenLoading()
+        error != null -> ErrorState(error) { viewModel.fetchChatRooms() }
+        rooms.isEmpty() -> EmptyState { viewModel.fetchChatRooms() }
+        else -> {
+            // Add debug text
+            if (BuildConfig.DEBUG) {
+                Text(
+                    text = "Showing ${rooms.size} rooms (${rooms.count { it.isLocal }} local)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+
+            LazyColumn {
+                items(rooms) { room ->
+                    // Your existing room item
+                }
+            }
+        }
     }
+
+
+
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -506,13 +545,20 @@ private fun ErrorState(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = error ?: stringResource(R.string.unknown_error),
+            text = error ?: "Unknown error",
             color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyLarge
+            style = MaterialTheme.typography.bodyMedium
         )
         Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onRetry) {
-            Text(stringResource(R.string.retry))
+        Button(
+            onClick = onRetry,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
+        ) {
+            Icon(Icons.Default.Refresh, contentDescription = "Retry")
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Try Again")
         }
     }
 }

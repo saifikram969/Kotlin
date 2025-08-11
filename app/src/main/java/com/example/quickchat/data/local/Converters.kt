@@ -1,6 +1,8 @@
 package com.example.quickchat.data.local
 
 import androidx.room.TypeConverter
+import com.example.quickchat.data.model.MessageStatus
+import com.example.quickchat.data.model.MessageType
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.util.*
@@ -47,4 +49,18 @@ class Converters {
     fun timestampToDate(value: Long?): Date? {
         return value?.let { Date(it) }
     }
-}
+
+        @TypeConverter
+        fun fromMessageStatus(status: MessageStatus): String = status.name
+
+        @TypeConverter
+        fun toMessageStatus(value: String): MessageStatus = MessageStatus.valueOf(value)
+
+        @TypeConverter
+        fun fromMessageType(type: MessageType): String = type.name
+
+        @TypeConverter
+        fun toMessageType(value: String): MessageType = MessageType.valueOf(value)
+
+
+    }

@@ -5,10 +5,14 @@ import androidx.lifecycle.viewModelScope
 import com.example.quickchat.data.model.ChatRoom
 import com.example.quickchat.data.repository.ChatRepository
 import com.example.quickchat.data.repository.ChatRoomRepository
+import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -21,6 +25,22 @@ class ChatRoomListViewModel @Inject constructor(
     // Chat Rooms State
     private val _chatRooms = MutableStateFlow<List<ChatRoom>>(emptyList())
     val chatRooms: StateFlow<List<ChatRoom>> = _chatRooms
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+
+
+
+    // Add this new function to manually refresh
+    fun refreshChatRooms(forceRefresh: Boolean = false) {
+        fetchChatRooms(forceRefresh)
+    }
+
+
+
 
     // Loading State
     private val _isLoading = MutableStateFlow(false)
@@ -50,25 +70,44 @@ class ChatRoomListViewModel @Inject constructor(
         fetchChatRooms()
     }
 
-    fun fetchChatRooms() {
+    // Modify the fetchChatRooms function
+    fun fetchChatRooms(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _isLoading.value = true
-            _error.value = null
+            try {
+                if (forceRefresh) {
+                    repository.syncRoomsWithFirestore(userId)
+                }
 
-            repository.getChatRooms(userId)
-                .catch { e ->
-                    _error.value = "Failed to load chat rooms: ${e.message}"
-                    _isLoading.value = false
-                }
-                .collectLatest { rooms ->
-                    _chatRooms.value = rooms
-                    _isLoading.value = false
-                    Log.d("ChatRooms", "Fetched ${rooms.size} rooms")
-                }
+                repository.getChatRooms(userId)
+                    .distinctUntilChanged()
+                    .catch { e ->
+                        _error.value = "Error: ${e.message}"
+                        emit(emptyList())
+                    }
+                    .collect { rooms ->
+                        _chatRooms.value = rooms
+                            .sortedByDescending { it.lastTimestamp }
+                            .map { room ->
+                                // Preserve local UI state
+                                _chatRooms.value.find { it.roomId == room.roomId }?.let { existing ->
+                                    room.copy(
+                                        isMuted = existing.isMuted,
+                                        isProcessingMute = existing.isProcessingMute
+                                    )
+                                } ?: room
+                            }
+                        _isLoading.value = false
+                    }
+            } catch (e: Exception) {
+                _error.value = "Failed to load: ${e.message}"
+                _isLoading.value = false
+            }
         }
     }
 
-    // Removed the 'override' keyword since this isn't overriding anything
+
+
     suspend fun markAsRead(roomId: String) {
         Log.d("UNREAD_DEBUG", " ViewModel markAsRead called for room $roomId")
         try {
@@ -99,15 +138,35 @@ class ChatRoomListViewModel @Inject constructor(
         }
     }
 
+    // Add this to ChatRoomListViewModel.kt
+    fun deleteChatroom(roomId: String, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                repository.deleteRoom(roomId) // Firestore + local delete
+                onSuccess() // No manual filtering — let listener update UI
+            } catch (e: Exception) {
+                _error.value = "Failed to delete chatroom: ${e.message}"
+            }
+        }
+    }
+
+
+
     fun deleteRoom(roomId: String) {
         viewModelScope.launch {
             try {
+                // Optimistically update UI
                 _chatRooms.value = _chatRooms.value.filter { it.roomId != roomId }
+
+                // Perform actual deletion
                 repository.deleteRoom(roomId)
+
+                // Show undo option
                 _showUndo.value = UndoAction(roomId, "deleted")
             } catch (e: Exception) {
+                // If error occurs, revert UI state
                 _error.value = "Failed to delete room: ${e.message}"
-                fetchChatRooms()
+                fetchChatRooms() // Refresh the list
             }
         }
     }
@@ -145,26 +204,21 @@ class ChatRoomListViewModel @Inject constructor(
         _showUndo.value = null
     }
 
+    // Remove the override keyword since this isn't implementing any interface
     fun createChatRoom(otherUserId: String) {
         viewModelScope.launch {
             _roomCreationState.value = RoomCreationState.Loading
             try {
-                // Check if room already exists
-                val potentialRoomId = listOf(userId, otherUserId).sorted().joinToString("_")
-                val roomExists = repository.doesRoomExist(potentialRoomId)
+                // Use the repository to handle the actual creation
+                val result = repository.createChatRoom(userId, otherUserId)
 
-                if (roomExists) {
-                    _roomCreationState.value = RoomCreationState.Error("Chat already exists")
+                if (result.isSuccess) {
+                    _roomCreationState.value = RoomCreationState.Success(result.getOrThrow())
+                    fetchChatRooms() // Refresh the list
                 } else {
-                    val result = repository.createChatRoom(userId, otherUserId)
-                    if (result.isSuccess) {
-                        _roomCreationState.value = RoomCreationState.Success(result.getOrThrow())
-                        fetchChatRooms() // Refresh the list
-                    } else {
-                        _roomCreationState.value = RoomCreationState.Error(
-                            result.exceptionOrNull()?.message ?: "Failed to create room"
-                        )
-                    }
+                    _roomCreationState.value = RoomCreationState.Error(
+                        result.exceptionOrNull()?.message ?: "Failed to create room"
+                    )
                 }
             } catch (e: Exception) {
                 _roomCreationState.value = RoomCreationState.Error(
@@ -173,8 +227,6 @@ class ChatRoomListViewModel @Inject constructor(
             }
         }
     }
-
-
 
     fun resetRoomCreationState() {
         _roomCreationState.value = RoomCreationState.Idle
@@ -282,4 +334,35 @@ class ChatRoomListViewModel @Inject constructor(
                 Log.e("lalo", " Error in onNewMessageReceived: ${e.message}", e)
             }
         }
-    }}
+    }
+    // link join with user
+// Add these to ChatRoomListViewModel.kt
+    private val _shareLinkState = MutableStateFlow<ShareLinkState>(ShareLinkState.Idle)
+    val shareLinkState: StateFlow<ShareLinkState> = _shareLinkState
+
+    sealed class ShareLinkState {
+        object Idle : ShareLinkState()
+        object Loading : ShareLinkState()
+        data class Success(val link: String) : ShareLinkState()
+        data class Error(val message: String) : ShareLinkState()
+    }
+
+    fun generateShareLink(roomId: String) {
+        viewModelScope.launch {
+            _shareLinkState.value = ShareLinkState.Loading
+            try {
+                val link = repository.generateInviteLink(roomId, userId)
+                _shareLinkState.value = ShareLinkState.Success(link)
+            } catch (e: Exception) {
+                _shareLinkState.value = ShareLinkState.Error(e.message ?: "Failed to generate link")
+            }
+        }
+    }
+
+    fun resetShareLinkState() {
+        _shareLinkState.value = ShareLinkState.Idle
+    }
+
+
+
+}

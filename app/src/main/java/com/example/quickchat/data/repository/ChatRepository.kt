@@ -34,6 +34,7 @@ import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
 import javax.inject.Inject
+import kotlin.text.get
 
 private const val CHATROOMS_COLLECTION = "chatrooms"
 private val USERS_COLLECTION = "users"
@@ -44,6 +45,8 @@ private const val TAG = "ChatRepository"
 class ChatRepository @Inject constructor(
     private val database: FirebaseFirestore,
     private val chatMessageDao: ChatMessageDao
+
+
 ) {
     init {
         database.firestoreSettings = FirebaseFirestoreSettings.Builder()
@@ -728,46 +731,137 @@ class ChatRepository @Inject constructor(
     }
 
     // In ChatRepository.kt
-    fun listenToMessages(roomId: String): Flow<List<ChatMessage>> = callbackFlow {
-        val listener = database.collection(CHATROOMS_COLLECTION)
-            .document(roomId)
-            .collection("messages")
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
-                when {
-                    error != null -> {
-                        Log.e(TAG, "Error listening to messages", error)
-                        trySend(emptyList())
-                    }
-                    snapshot == null || snapshot.isEmpty -> {
-                        trySend(emptyList())
-                    }
-                    else -> {
-                        val messages = snapshot.documents.mapNotNull { doc ->
-                            try {
-                                val data = doc.data ?: emptyMap()
-                                val message = ChatMessage.fromFirestore(data)
+     fun listenToMessages(roomId: String): Flow<List<ChatMessage>> = callbackFlow {
+        // FIRST: Always emit cached messages immediately
+        val cachedMessages = try {
+            chatMessageDao.getMessagesByRoom(roomId)
+                .first()
+                .map { it.toChatMessage() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        trySend(cachedMessages)
 
-                                // IMPORTANT: Ensure status updates are properly handled
-                                if (message.status == MessageStatus.SEEN) {
-                                    // Update local cache with SEEN status
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        cacheMessage(roomId, message)
-                                    }
-                                }
-                                message
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error parsing message", e)
-                                null
-                            }
+        // THEN: Setup Firestore listener if online
+        if (isNetworkAvailable()) {
+            val listener = database.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("messages")
+                .orderBy("timestamp")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.e(TAG, "Listen error", error)
+                        return@addSnapshotListener
+                    }
+
+                    val messages = snapshot?.documents?.mapNotNull { doc ->
+                        try {
+                            ChatMessage.fromFirestore(doc.data ?: emptyMap())
+                        } catch (e: Exception) {
+                            null
                         }
-                        trySend(messages)
+                    } ?: emptyList()
+
+                    // Save new messages to cache
+                    CoroutineScope(Dispatchers.IO).launch {
+                        messages.forEach { message ->
+                            chatMessageDao.insertMessage(message.toEntity(roomId))
+                        }
+                    }
+
+                    trySend(messages)
+                }
+
+            awaitClose { listener.remove() }
+        } else {
+            awaitClose { }
+        }
+    }
+
+     suspend fun getCachedMessages(roomId: String): List<ChatMessage> {
+        return try {
+            chatMessageDao.getMessagesByRoomOnce(roomId).map { it.toChatMessage() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load cached messages", e)
+            emptyList()
+        }
+    }
+
+    suspend fun syncMissingMessages(roomId: String) {
+        try {
+            val newestLocalTimestamp = chatMessageDao.getNewestTimestamp(roomId) ?: 0L
+
+            val newMessages = database.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("messages")
+                .whereGreaterThan("timestamp", newestLocalTimestamp)
+                .get()
+                .await()
+                .documents
+                .mapNotNull { doc ->
+                    try {
+                        ChatMessage.fromFirestore(doc.data ?: emptyMap())
+                    } catch (e: Exception) {
+                        null
                     }
                 }
+
+            newMessages.forEach { message ->
+                chatMessageDao.insertMessage(message.toEntity(roomId))
+            }
+            val oldestLocalTimestamp = chatMessageDao.getOldestTimestamp(roomId) ?: Long.MAX_VALUE
+
+            if (oldestLocalTimestamp > 0) {
+                val olderMessages = database.collection(CHATROOMS_COLLECTION)
+                    .document(roomId)
+                    .collection("messages")
+                    .whereLessThan("timestamp", oldestLocalTimestamp)
+                    .orderBy("timestamp", Query.Direction.DESCENDING)
+                    .limit(50)
+                    .get()
+                    .await()
+                    .documents
+                    .mapNotNull { doc ->
+                        try {
+                            ChatMessage.fromFirestore(doc.data ?: emptyMap())
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+
+                olderMessages.forEach { message ->
+                    chatMessageDao.insertMessage(message.toEntity(roomId))
+                }            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error syncing missing messages", e)
+        }
+    }
+
+
+    suspend fun sendMessageWithOfflineSupport(roomId: String, message: ChatMessage): Result<Unit> {
+        return try {
+            chatMessageDao.insertMessage(message.copy(status = MessageStatus.SENDING).toEntity(roomId))
+
+            if (!isNetworkAvailable()) {
+                chatMessageDao.updateMessageStatus(message.id, MessageStatus.FAILED.name)
+                return Result.failure(Exception("Offline - message queued"))
             }
 
-        awaitClose { listener.remove() }
-    }    // Local Cache Operations
+            val result = sendMessage(roomId, message)
+
+            if (result.isSuccess) {
+                chatMessageDao.updateMessageStatus(message.id, MessageStatus.SENT.name)
+            } else {
+                chatMessageDao.updateMessageStatus(message.id, MessageStatus.FAILED.name)
+            }
+
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending message with offline support", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun cacheMessage(roomId: String, message: ChatMessage) {
         try {
             chatMessageDao.insertMessage(message.toEntity(roomId))
@@ -868,7 +962,6 @@ class ChatRepository @Inject constructor(
                 )
             )
 
-            // In production, send to your backend instead
             database.collection("notification_requests").add(payload).await()
             true
         } catch (e: Exception) {
@@ -897,7 +990,6 @@ class ChatRepository @Inject constructor(
         }
     }
 
-    // Presence-related functions
     fun observeUserPresence(userId: String): Flow<Boolean> = callbackFlow {
         val presenceRef = database.collection("presence").document(userId)
         val listener = presenceRef.addSnapshotListener { snapshot, _ ->
@@ -960,7 +1052,6 @@ class ChatRepository @Inject constructor(
             Log.e(TAG, "Error updating typing status", e)
         }
     }
-
     suspend fun getRoomParticipants(roomId: String): List<String> {
         return database.collection(CHATROOMS_COLLECTION)
             .document(roomId)
@@ -969,10 +1060,22 @@ class ChatRepository @Inject constructor(
             .get("participants") as? List<String> ?: emptyList()
     }
 
+    suspend fun clearMessagesForUserInRoom(userId: String, roomId: String) {
+        val messagesRef = FirebaseFirestore.getInstance()
+            .collection("messages")
+            .document(userId)
+            .collection(roomId)
+        chatMessageDao.clearMessagesForUserInRoom(roomId, userId)
+
+        val snapshot = messagesRef.get().await()
+        for (doc in snapshot.documents) {
+            doc.reference.delete().await()
+        }
+    }
 
     interface ChatRepository {
         suspend fun deleteChatroom(roomId: String)
-        // ... your other repository methods
+
     }
 
 }

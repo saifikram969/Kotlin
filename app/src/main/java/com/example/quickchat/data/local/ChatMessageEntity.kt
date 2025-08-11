@@ -11,10 +11,11 @@ data class ChatMessageEntity(
     val text: String,
     val senderId: String,
     val timestamp: Long,
-    val status: String, // "SENDING", "SENT", "FAILED"
+    val status: String,
     val isSystemMessage: Boolean,
     val clientGeneratedId: String,
     val roomId: String,
-    val messageType: String, // <-- ADD THIS
-    val imageUrl: String? = null // <-- ADD THIS
+    val messageType: String,
+    val imageUrl: String? = null,
+    val thumbnailUrl: String? = null
 )

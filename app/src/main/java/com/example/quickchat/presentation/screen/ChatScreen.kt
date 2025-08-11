@@ -1,11 +1,22 @@
 package com.example.quickchat.presentation.screen
 
+import android.R.id.message
 import android.content.ActivityNotFoundException
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
+import android.content.ContentResolver
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Archive
 import android.os.Build
+import android.webkit.MimeTypeMap
+import java.io.InputStream
 import android.content.Intent
 import com.example.quickchat.utils.ChatExporter
 import androidx.compose.material.icons.outlined.Delete
@@ -15,12 +26,15 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.DisposableEffect
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -45,11 +59,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import androidx.compose.ui.window.PopupProperties
 import coil.compose.AsyncImage
 import com.cloudinary.android.MediaManager
 import com.cloudinary.android.callback.ErrorInfo
 import com.cloudinary.android.callback.UploadCallback
+import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.MessageStatus
 import com.example.quickchat.presentation.component.ChatTopBar
 import com.example.quickchat.presentation.component.MessageBubble
@@ -65,6 +81,7 @@ import java.io.IOException
 import java.nio.file.WatchEvent
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.coroutines.ContinuationInterceptor
 
 @Composable
 fun ChatScreen(
@@ -75,7 +92,6 @@ fun ChatScreen(
     onBackClick: () -> Unit
 ) {
 
-    // Add this LaunchedEffect to mark messages as read when screen is shown
     LaunchedEffect(Unit) {
         viewModel.markMessagesAsRead(roomId, currentUserId)
     }
@@ -94,6 +110,9 @@ fun ChatScreen(
     var showExportDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
+    val networkStatus by viewModel.networkStatus.collectAsState()
+
+
     // Handle lifecycle events for presence
     DisposableEffect(Unit) {
         viewModel.updatePresence(currentUserId, true)
@@ -104,8 +123,6 @@ fun ChatScreen(
             viewModel.updateTypingStatus(roomId, currentUserId, false)
         }
     }
-
-
     // Combined initialization and cleanup effect
     DisposableEffect(roomId, currentUserId, otherUserId) {
         // Initialization
@@ -115,7 +132,6 @@ fun ChatScreen(
         viewModel.observeTypingStatus(roomId, otherUserId)
         viewModel.markMessagesAsRead(roomId, currentUserId)
 
-        // Cleanup
         onDispose {
             viewModel.updatePresence(currentUserId, false)
             viewModel.updateTypingStatus(roomId, currentUserId, false)
@@ -126,6 +142,7 @@ fun ChatScreen(
     var isTyping by remember { mutableStateOf(false) }
     var typingDebounceJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
+    //image picker
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -190,7 +207,7 @@ fun ChatScreen(
                                                 senderId = currentUserId,
                                                 text = "",
                                                 imageUrl = fullImageUrl,
-                                                thumbnailUrl = thumbUrl
+                                                thumbnailUrl = thumbUrl,
                                             )
                                             isUploading = false
                                             uploadProgress = 0f
@@ -218,6 +235,146 @@ fun ChatScreen(
                 }
             }
         }
+
+    }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { fileUri ->
+            coroutineScope.launch {
+                try {
+                    // Get file details
+                    val inputStream = context.contentResolver.openInputStream(fileUri)
+                    val mimeType = context.contentResolver.getType(fileUri)
+                    val fileExtension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+                    val fileName = context.contentResolver.query(fileUri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        cursor.moveToFirst()
+                        cursor.getString(nameIndex)
+                    } ?: "file_${System.currentTimeMillis()}.$fileExtension"
+
+                    val fileSize = context.contentResolver.openFileDescriptor(fileUri, "r")?.use {
+                        it.statSize
+                    }
+
+                    // Create temp file
+                    val tempFile = File.createTempFile(
+                        "upload_${System.currentTimeMillis()}",
+                        ".$fileExtension",
+                        context.cacheDir
+                    ).apply {
+                        inputStream?.use { input ->
+                            FileOutputStream(this).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+
+                    // Check file size
+                    val maxSize = 10 * 1024 * 1024 // 10MB
+                    if (tempFile.length() > maxSize) {
+                        Toast.makeText(context, "File too large. Max 10MB allowed.", Toast.LENGTH_SHORT).show()
+                        tempFile.delete()
+                        return@launch
+                    }
+
+                    isUploading = true
+                    uploadProgress = 0f
+
+                    // Create temporary message
+                    val tempMessage = ChatMessage(
+                        id = UUID.randomUUID().toString(),
+                        text = "",
+                        senderId = currentUserId,
+                        timestamp = System.currentTimeMillis(),
+                        status = MessageStatus.SENDING,
+                        fileUrl = null,
+                        fileName = fileName,
+                        fileType = mimeType,
+                        fileSize = fileSize,
+                        imageUrl = null,
+                        isTemp = true,
+                        uploadProgress = 0f
+                    )
+
+                    // Add to UI immediately
+                    viewModel.addTempMessage(tempMessage)
+
+                    // Determine Cloudinary resource type
+                    val resourceType = when {
+                        mimeType?.startsWith("image/") == true -> "image"
+                        mimeType?.startsWith("audio/") == true -> "video"
+                        else -> "raw"
+                    }
+
+                    // Upload to Cloudinary
+                    MediaManager.get().upload(tempFile.absolutePath)
+                        .option("resource_type", resourceType)
+                        .callback(object : UploadCallback {
+                            override fun onStart(requestId: String?) {
+                                Log.d("FileUpload", "Upload started for $fileName")
+                            }
+
+                            override fun onProgress(requestId: String?, bytes: Long, totalBytes: Long) {
+                                uploadProgress = bytes.toFloat() / totalBytes.toFloat()
+                                viewModel.updateTempMessage(
+                                    tempMessage.id,
+                                    uploadProgress = uploadProgress,
+                                    status = MessageStatus.SENT
+                                )
+                            }
+
+                            override fun onSuccess(requestId: String?, resultData: Map<*, *>) {
+                                val fileUrl = resultData["secure_url"] as? String ?: run {
+                                    Toast.makeText(context, "Upload failed: No URL returned", Toast.LENGTH_SHORT).show()
+                                    return
+                                }
+
+                                Log.d("FileUpload", "Upload successful: $fileUrl")
+
+                                viewModel.updateTempMessage(
+                                    tempMessage.id,
+                                    fileUrl = fileUrl,
+                                    status = MessageStatus.SENT,
+                                    uploadProgress = 1f,
+                                    isTemp = false
+                                )
+                                isUploading = false
+                                tempFile.delete()
+                            }
+
+                            override fun onError(requestId: String?, error: ErrorInfo?) {
+                                Log.e("FileUpload", "Upload failed: ${error?.description}")
+                                viewModel.updateTempMessage(
+                                    tempMessage.id,
+                                    status = MessageStatus.FAILED
+                                )
+                                Toast.makeText(
+                                    context,
+                                    "Upload failed: ${error?.description ?: "Unknown error"}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                isUploading = false
+                                tempFile.delete()
+                            }
+
+                            override fun onReschedule(requestId: String?, error: ErrorInfo?) {
+                                Log.w("FileUpload", "Upload rescheduled: ${error?.description}")
+                            }
+                        }).dispatch()
+
+                } catch (e: Exception) {
+                    Log.e("FileUpload", "Upload failed", e)
+                    Toast.makeText(
+                        context,
+                        "Upload failed: ${e.localizedMessage}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    isUploading = false
+                }
+            }
+        }
     }
 
     val uiState by viewModel.uiState.collectAsState()
@@ -240,7 +397,6 @@ fun ChatScreen(
             viewModel.markMessagesAsRead(roomId, currentUserId)
         }
     }
-
 
     val showScrollToBottomButton by remember {
         derivedStateOf {
@@ -299,6 +455,22 @@ fun ChatScreen(
         modifier = Modifier
             .fillMaxSize()
     ) {
+        // Network status indicator
+        if (!networkStatus) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Red.copy(alpha = 0.7f))
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Offline - Messages will be sent when connection is restored",
+                    color = Color.Black,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
         ChatTopBar(
             chatRoomName = "Chat Room",
             participantName = otherUserId,
@@ -430,9 +602,7 @@ fun ChatScreen(
             }
         }
 
-// Export confirmation dialog
-        // Export dialog
-        // Export dialog
+        // Export confirmation dialog
         if (showExportDialog && uiState is ChatUiState.Success) {
             val messages = (uiState as ChatUiState.Success).messages
             AlertDialog(
@@ -516,7 +686,7 @@ fun ChatScreen(
                     TextButton(
                         onClick = {
                             showDeleteDialog = false
-                            viewModel.deleteChatroom(roomId)
+                            viewModel.deleteChatroomForUser(roomId, currentUserId)
                             onBackClick() // Navigate back after deletion
                         }
                     ) {
@@ -559,6 +729,9 @@ fun ChatScreen(
             is ChatUiState.Success -> {
                 val state = uiState as ChatUiState.Success
                 val (systemMessages, regularMessages) = state.messages.partition { it.isSystemMessage }
+
+
+
 
                 LaunchedEffect(state.messages) {
                     delay(100) // Let layout settle
@@ -679,31 +852,60 @@ fun ChatScreen(
                     }
 
                     Surface(
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         shape = RoundedCornerShape(32.dp),
                         tonalElevation = 4.dp,
-                       // shadowElevation = 2.dp
                     ) {
                         Row(
                             modifier = Modifier
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .heightIn(min = 48.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                           // horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // File attachment button - always visible
                             IconButton(
-                                onClick = { imagePickerLauncher.launch("image/*") },
-                                modifier = Modifier.size(40.dp),
-                                enabled = !isUploading
+                                onClick = {
+                                    filePickerLauncher.launch("*/*") // Opens file picker for all file types
+                                },
+                                modifier = Modifier.size(36.dp)
                             ) {
-                                if (isUploading) {
-                                    CircularProgressIndicator(Modifier.size(24.dp),
-                                        strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Outlined.Image, contentDescription = "Pick Image", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                                Icon(
+                                    Icons.Outlined.AttachFile,
+                                    contentDescription = "Attach File",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(24.dp))
+                            }
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
+                            // Image picker button - hides when typing
+                            AnimatedVisibility(
+                                visible = messageText.isBlank(),
+                                enter = fadeIn(animationSpec = tween(100)),
+                                exit = fadeOut(animationSpec = tween(100)),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { imagePickerLauncher.launch("image/*") },
+                                    enabled = !isUploading
+                                ) {
+                                    if (isUploading) {
+                                        CircularProgressIndicator(
+                                            Modifier.size(20.dp),
+                                            strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(
+                                            Icons.Outlined.Image,
+                                            contentDescription = "Pick Image",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp))
+                                    }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
 
                             TextField(
                                 value = messageText,
@@ -712,10 +914,13 @@ fun ChatScreen(
                                         messageText = it
                                     }
                                 },
-                                modifier = Modifier.weight(1f).padding(end = 8.dp),
-                                placeholder = { Text("Type a message...") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 4.dp)
+                                    .heightIn(max = 100.dp),
+                                placeholder = { Text("How's your day?") },
                                 singleLine = false,
-                                maxLines = 5,
+                                maxLines = 4,
                                 shape = RoundedCornerShape(24.dp),
                                 colors = TextFieldDefaults.colors(
                                     focusedContainerColor = Color.Transparent,
@@ -727,45 +932,92 @@ fun ChatScreen(
                                 ),
                                 trailingIcon = {
                                     if (messageText.isNotBlank()) {
-                                        IconButton(onClick = { messageText = "" }) {
-                                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        IconButton(
+                                            onClick = { messageText = "" },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Clear",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp))
                                         }
                                     }
                                 }
+
                             )
 
-                            IconButton(
-                                onClick = {
-                                    if (messageText.isNotBlank()) {
-                                        viewModel.sendMessage(roomId, currentUserId, messageText, null)
-                                        messageText = ""
-                                        viewModel.updateTypingStatus(roomId, currentUserId, false)
-                                        isTyping = false
-                                        coroutineScope.launch {
-                                            delay(100)
-                                            listState.animateScrollToItem(state.messages.lastIndex)
-
-                                            val groupedMessages = state.messages
-                                                .filterNot { it.isSystemMessage }
-                                                .groupBy {
-                                                    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
+                            // Dynamic button that changes between mic and send
+                            Crossfade(
+                                targetState = messageText.isNotBlank(),
+                                animationSpec = tween(100),
+                                modifier = Modifier.size(40.dp)
+                            ) { showSendButton ->
+                                if (showSendButton) {
+                                    IconButton(
+                                        onClick = {
+                                            if (messageText.isNotBlank()) {
+                                                viewModel.sendMessage(roomId, currentUserId, messageText, null)
+                                                messageText = ""
+                                                viewModel.updateTypingStatus(roomId, currentUserId, false)
+                                                isTyping = false
+                                                coroutineScope.launch {
+                                                    delay(100)
+                                                    val groupedMessages = state.messages
+                                                        .filterNot { it.isSystemMessage }
+                                                        .groupBy {
+                                                            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                                                                .format(Date(it.timestamp))
+                                                        }
+                                                    val totalItems = groupedMessages.size +
+                                                            state.messages.count { !it.isSystemMessage }
+                                                    if (totalItems > 0) {
+                                                        listState.animateScrollToItem(totalItems - 1)
+                                                    }
                                                 }
-
-                                            val totalItems = groupedMessages.size + state.messages.count { !it.isSystemMessage }
-
-                                            if (totalItems > 0) {
-                                                listState.animateScrollToItem(totalItems - 1)
                                             }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                color = Color.Black,
+                                                shape = RoundedCornerShape(50))
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Send,
+                                            contentDescription = "Send",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp))
+                                    }
+                                } else {
+                                    var isRecording by remember { mutableStateOf(false) }
+                                    IconButton(
+                                        onClick = {
+                                            isRecording = true
+                                            // TODO: Implement audio recording logic
+                                            Toast.makeText(context, "Audio recording coming soon", Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                MaterialTheme.colorScheme.primary,
+                                                shape = RoundedCornerShape(50)),
+                                        enabled = !isRecording
+                                    ) {
+                                        if (isRecording) {
+                                            CircularProgressIndicator(
+                                                color = Color.White,
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp)
+                                        } else {
+                                            Icon(
+                                                Icons.Outlined.Mic,
+                                                contentDescription = "Record Audio",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(20.dp))
                                         }
                                     }
-                                },
-                                enabled = messageText.isNotBlank(),
-                                modifier = Modifier.size(48.dp).background(
-                                    if (messageText.isNotBlank()) Color.Black else Color.LightGray,
-                                    shape = RoundedCornerShape(50)
-                                )
-                            ) {
-                                Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
+                                }
                             }
                         }
                     }
@@ -774,8 +1026,6 @@ fun ChatScreen(
         }
     }
 }
-
-
 
 
 @Composable

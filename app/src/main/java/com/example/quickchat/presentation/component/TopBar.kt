@@ -30,9 +30,14 @@ fun ChatTopBar(
     onMoreOptionsClick: () -> Unit,
     modifier: Modifier
 ) {
+
+    val charcoalColor = Color(0xFF36454F) // Charcoal color
+    val onlineColor = Color(0xFF4CAF50)   // Green for online status
+    val offlineColor = Color(0xFF9E9E9E)  // Gray for offline status
+
     var showStatusText by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
-    var statusColor by remember { mutableStateOf(Color(0xFF81C784)) }
+    var statusColor by remember { mutableStateOf(Color(0xFF4CAF50)) }
 
     // For animated typing dots
     val dotCount = 3
@@ -104,6 +109,12 @@ fun ChatTopBar(
     }
 
     TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = charcoalColor,
+            titleContentColor = Color.White,
+            actionIconContentColor = Color.White,
+            navigationIconContentColor = Color.White
+        ),
         title = {
             Column(
                 modifier = Modifier.fillMaxWidth(),

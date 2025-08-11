@@ -16,7 +16,11 @@ interface ChatRoomRepository {
     suspend fun incrementUnreadCount(roomId: String, userId: String)
     suspend fun markMessagesAsRead(roomId: String, userId: String)
     fun getUnreadCountFlow(roomId: String, userId: String): Flow<Int>
-
+//sharelink
+    suspend fun generateInviteLink(roomId: String, creatorId: String): String
+    suspend fun joinChatroomViaLink(roomId: String, token: String, userId: String): Boolean
+    suspend fun revokeInviteLink(roomId: String)
+    suspend fun syncRoomsWithFirestore(userId: String)
 
 }// Create this in a new file or at the top of your repository
 sealed class RepositoryResult<out T> {

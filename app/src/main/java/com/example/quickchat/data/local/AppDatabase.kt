@@ -11,7 +11,7 @@ import com.example.quickchat.data.model.ChatRoom
 
 @Database(
     entities = [ChatMessageEntity::class, ChatRoom::class], // Include both entities
-    version = 14, // Increment version since we're changing schema
+    version = 18, // Increment version since we're changing schema
     exportSchema = true
 )
 @TypeConverters(Converters::class) // Add this for List<String> conversion
@@ -65,6 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
                 // Currently just a placeholder
             }
         }
+
         // In AppDatabase.kt
         val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(database: SupportSQLiteDatabase) {
@@ -85,7 +86,8 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 // Recreate the table with all correct columns
-                database.execSQL("""
+                database.execSQL(
+                    """
                     CREATE TABLE new_chat_rooms (
                         roomId TEXT NOT NULL PRIMARY KEY,
                         name TEXT,
@@ -101,10 +103,12 @@ abstract class AppDatabase : RoomDatabase() {
                         isDeleted INTEGER NOT NULL DEFAULT 0,
                         pendingMuteState INTEGER
                     )
-                """)
+                """
+                )
 
                 // Copy data from old table
-                database.execSQL("""
+                database.execSQL(
+                    """
                     INSERT INTO new_chat_rooms 
                     SELECT 
                         roomId, name, lastMessage, lastTimestamp, unreadCount, 
@@ -115,7 +119,8 @@ abstract class AppDatabase : RoomDatabase() {
                         CASE WHEN isDeleted IS NULL THEN 0 ELSE isDeleted END,
                         pendingMuteState
                     FROM chat_rooms
-                """)
+                """
+                )
 
                 // Remove old table and rename new one
                 database.execSQL("DROP TABLE chat_rooms")
@@ -126,7 +131,8 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 // 1. Create new table with all columns
-                database.execSQL("""
+                database.execSQL(
+                    """
             CREATE TABLE new_chat_rooms (
                 roomId TEXT NOT NULL PRIMARY KEY,
                 name TEXT,
@@ -142,10 +148,12 @@ abstract class AppDatabase : RoomDatabase() {
                 isDeleted INTEGER NOT NULL DEFAULT 0,
                 pendingMuteState INTEGER
             )
-        """)
+        """
+                )
 
                 // 2. Copy data with only the columns that exist
-                database.execSQL("""
+                database.execSQL(
+                    """
             INSERT INTO new_chat_rooms 
             SELECT 
                 roomId, name, lastMessage, lastTimestamp, unreadCount, 
@@ -156,7 +164,8 @@ abstract class AppDatabase : RoomDatabase() {
                 0,  -- Default value for isDeleted
                 NULL -- Default value for pendingMuteState
             FROM chat_rooms
-        """)
+        """
+                )
 
                 database.execSQL("DROP TABLE chat_rooms")
                 database.execSQL("ALTER TABLE new_chat_rooms RENAME TO chat_rooms")
@@ -178,5 +187,243 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // 1. Create the new table with the updated schema
+                database.execSQL(
+                    """
+            CREATE TABLE new_chat_rooms (
+                roomId TEXT NOT NULL PRIMARY KEY,
+                name TEXT,
+                lastMessage TEXT,
+                lastTimestamp INTEGER NOT NULL,
+                unreadCount INTEGER NOT NULL,
+                userId TEXT NOT NULL,
+                participants TEXT NOT NULL,
+                lastRead INTEGER NOT NULL,
+                lastUpdated INTEGER NOT NULL DEFAULT 0, -- new column with default
+                isLocal INTEGER NOT NULL DEFAULT 0,     -- new column with default
+                isArchived INTEGER NOT NULL DEFAULT 0,
+                isDeleted INTEGER NOT NULL DEFAULT 0,
+                isMuted INTEGER NOT NULL DEFAULT 0,
+                isProcessingMute INTEGER NOT NULL DEFAULT 0,
+                pendingMuteState INTEGER,
+                fcmTokens TEXT NOT NULL DEFAULT '{}'
+            )
+        """
+                )
+
+                // 2. Copy over old data, setting defaults for new columns
+                database.execSQL(
+                    """
+            INSERT INTO new_chat_rooms (
+                roomId, name, lastMessage, lastTimestamp, unreadCount,
+                userId, participants, lastRead,
+                lastUpdated, isLocal,
+                isArchived, isDeleted, isMuted, isProcessingMute,
+                pendingMuteState, fcmTokens
+            )
+            SELECT
+                roomId, name, lastMessage, lastTimestamp, unreadCount,
+                userId, participants, lastRead,
+                0 AS lastUpdated,  -- default value
+                0 AS isLocal,      -- default value
+                COALESCE(isArchived, 0),
+                COALESCE(isDeleted, 0),
+                COALESCE(isMuted, 0),
+                COALESCE(isProcessingMute, 0),
+                pendingMuteState,
+                COALESCE(fcmTokens, '{}')
+            FROM chat_rooms
+        """
+                )
+
+                // 3. Drop the old table
+                database.execSQL("DROP TABLE chat_rooms")
+
+                // 4. Rename the new table to the original name
+                database.execSQL("ALTER TABLE new_chat_rooms RENAME TO chat_rooms")
+            }
+        }
+
+
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // If you added new columns, include them here
+                // This should match exactly what your current schema should be
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS new_chat_rooms (
+                        roomId TEXT NOT NULL PRIMARY KEY,
+                        name TEXT,
+                        lastMessage TEXT,
+                        lastTimestamp INTEGER NOT NULL,
+                        unreadCount INTEGER NOT NULL,
+                        userId TEXT NOT NULL,
+                        participants TEXT NOT NULL,
+                        lastRead INTEGER NOT NULL,
+                        lastUpdated INTEGER NOT NULL DEFAULT 0,
+                        isLocal INTEGER NOT NULL DEFAULT 0,
+                        isArchived INTEGER NOT NULL DEFAULT 0,
+                        isDeleted INTEGER NOT NULL DEFAULT 0,
+                        isMuted INTEGER NOT NULL DEFAULT 0,
+                        isProcessingMute INTEGER NOT NULL DEFAULT 0,
+                        pendingMuteState INTEGER,
+                        fcmTokens TEXT NOT NULL DEFAULT '{}'
+                    )
+                """)
+
+                // Copy data from old table
+                database.execSQL("""
+                    INSERT INTO new_chat_rooms (
+                        roomId, name, lastMessage, lastTimestamp, unreadCount,
+                        userId, participants, lastRead,
+                        lastUpdated, isLocal,
+                        isArchived, isDeleted, isMuted, isProcessingMute,
+                        pendingMuteState, fcmTokens
+                    )
+                    SELECT
+                        roomId, name, lastMessage, lastTimestamp, unreadCount,
+                        userId, participants, lastRead,
+                        COALESCE(lastUpdated, 0),
+                        COALESCE(isLocal, 0),
+                        COALESCE(isArchived, 0),
+                        COALESCE(isDeleted, 0),
+                        COALESCE(isMuted, 0),
+                        COALESCE(isProcessingMute, 0),
+                        pendingMuteState,
+                        COALESCE(fcmTokens, '{}')
+                    FROM chat_rooms
+                """)
+
+                // Remove old table and rename new one
+                database.execSQL("DROP TABLE chat_rooms")
+                database.execSQL("ALTER TABLE new_chat_rooms RENAME TO chat_rooms")
+            }
+        }
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // First check if thumbnailUrl exists in the old table
+                val cursor = database.query("PRAGMA table_info(chat_messages)")
+                var hasThumbnailUrl = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == "thumbnailUrl") {
+                        hasThumbnailUrl = true
+                        break
+                    }
+                }
+                cursor.close()
+
+                // Recreate the table with the new schema
+                database.execSQL("""
+            CREATE TABLE new_chat_messages (
+                id TEXT NOT NULL PRIMARY KEY,
+                text TEXT NOT NULL,
+                senderId TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                isSystemMessage INTEGER NOT NULL,
+                clientGeneratedId TEXT NOT NULL,
+                roomId TEXT NOT NULL,
+                messageType TEXT NOT NULL,
+                imageUrl TEXT,
+                thumbnailUrl TEXT
+            )
+        """)
+
+                // Copy data with conditional thumbnailUrl handling
+                if (hasThumbnailUrl) {
+                    database.execSQL("""
+                INSERT INTO new_chat_messages (
+                    id, text, senderId, timestamp, status,
+                    isSystemMessage, clientGeneratedId, roomId,
+                    messageType, imageUrl, thumbnailUrl
+                )
+                SELECT
+                    id, text, senderId, timestamp, status,
+                    isSystemMessage, clientGeneratedId, roomId,
+                    messageType, imageUrl, thumbnailUrl
+                FROM chat_messages
+            """)
+                } else {
+                    database.execSQL("""
+                INSERT INTO new_chat_messages (
+                    id, text, senderId, timestamp, status,
+                    isSystemMessage, clientGeneratedId, roomId,
+                    messageType, imageUrl, thumbnailUrl
+                )
+                SELECT
+                    id, text, senderId, timestamp, status,
+                    isSystemMessage, clientGeneratedId, roomId,
+                    messageType, imageUrl, NULL as thumbnailUrl
+                FROM chat_messages
+            """)
+                }
+
+                // Remove old table and rename new one
+                database.execSQL("DROP TABLE chat_messages")
+                database.execSQL("ALTER TABLE new_chat_messages RENAME TO chat_messages")
+            }
+        }
+
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // 1. Create new table with exact schema matching your entity
+                database.execSQL("""
+                    CREATE TABLE new_chat_rooms (
+                        roomId TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        lastMessage TEXT,
+                        lastTimestamp INTEGER NOT NULL,
+                        unreadCount INTEGER NOT NULL,
+                        userId TEXT NOT NULL,
+                        participants TEXT NOT NULL,
+                        lastRead INTEGER NOT NULL,
+                        lastUpdated INTEGER NOT NULL,
+                        isLocal INTEGER NOT NULL,
+                        isArchived INTEGER NOT NULL,
+                        isDeleted INTEGER NOT NULL,
+                        isMuted INTEGER NOT NULL,
+                        isProcessingMute INTEGER NOT NULL,
+                        pendingMuteState INTEGER,
+                        fcmTokens TEXT NOT NULL
+                    )
+                """)
+
+                // 2. Copy data with proper type conversions
+                database.execSQL("""
+                    INSERT INTO new_chat_rooms (
+                        roomId, name, lastMessage, lastTimestamp, unreadCount,
+                        userId, participants, lastRead, lastUpdated,
+                        isLocal, isArchived, isDeleted, isMuted, isProcessingMute,
+                        pendingMuteState, fcmTokens
+                    )
+                    SELECT
+                        roomId, 
+                        COALESCE(name, '') as name,
+                        lastMessage,
+                        COALESCE(lastTimestamp, 0) as lastTimestamp,
+                        COALESCE(unreadCount, 0) as unreadCount,
+                        userId,
+                        COALESCE(participants, '[]') as participants,
+                        COALESCE(lastRead, 0) as lastRead,
+                        COALESCE(lastUpdated, ${System.currentTimeMillis()}) as lastUpdated,
+                        COALESCE(isLocal, 0) as isLocal,
+                        COALESCE(isArchived, 0) as isArchived,
+                        COALESCE(isDeleted, 0) as isDeleted,
+                        COALESCE(isMuted, 0) as isMuted,
+                        COALESCE(isProcessingMute, 0) as isProcessingMute,
+                        pendingMuteState,
+                        COALESCE(fcmTokens, '{}') as fcmTokens
+                    FROM chat_rooms
+                """)
+
+                // 3. Replace old table
+                database.execSQL("DROP TABLE chat_rooms")
+                database.execSQL("ALTER TABLE new_chat_rooms RENAME TO chat_rooms")
+            }
+        }
     }
 }
+
+
+
