@@ -1,3 +1,53 @@
+## Week 3 Task - Message Attachments Implementation
+
+### Problem Statement
+The chat application lacked support for sending file attachments (PDFs, audio files) which limited communication to only text and images. Users needed a way to share documents and voice messages while maintaining a consistent UI experience.
+
+### Solution Overview
+Implemented a file attachment system that:
+1. Uses `ActivityResultLauncher` with MIME type filtering
+2. Uploads files to Cloudinary  Storage with organized folder structure
+3. Stores message metadata in Firestore
+4. Displays files in message bubbles with type-specific icons
+5. Shows upload progress with black-themed UI
+
+
+## Key Technical Decisions
+
+### 1. Cloudinary vs Firebase Storage
+- **Chose Cloudinary because**:
+  - Free tier offers
+  - Built-in transformations (PDF thumbnails, audio waveform generation)
+  - Automatic format optimization
+  - Better CDN performance globally
+  - **Firebase Blaze Plan was avoided** to prevent unexpected costs from storage overages
+    
+ ### 1. Dynamically Ui With animation
+- **Typing Input Field**:
+  - User type anything then hide the imagePicker icon Same as whatsapp
+  - Dynamically audio or send button
+
+ ## How to run/test
+1. Launch app and In ui 2 loginButton you can select any for testing you can select the open chat room (Static chatrrom for testing).
+2. Text Message: With 2 person user 1 or user 2
+3. File Attachment: select image or select pdf/ audio send
+    
+### Demo
+(https://github.com/user-attachments/assets/8e41ff10-e57f-448f-a2a8-63267e2a9498)  
+
+
+- Files updated:
+  - `ChatScreen.kt`
+  - `MessageBubble.kt`
+  - `ChatViewModel.kt`
+### Stretch Task
+1. Implemented Support image preview,
+2. Added PDF icon / and audio icon
+3. Audio Feature not implemented only done Ui not implemented backend
+
+### EOD 11-8-25 ###
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Week 3 Task 
  Resend Failed Messages & Delivery Receipts &Chat Export 
 Implemented Functionality
