@@ -33,7 +33,7 @@ Implemented a file attachment system that:
 3. File Attachment: select image or select pdf/ audio send
     
 ### Demo
-(https://github.com/user-attachments/assets/8e41ff10-e57f-448f-a2a8-63267e2a9498)  
+(https://github.com/user-attachments/assets/e0364693-724a-49ed-a68f-34b9c593e079)  
 
 
 - Files updated:
