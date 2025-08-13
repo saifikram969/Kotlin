@@ -59,14 +59,6 @@ class ChatRoomListViewModel @Inject constructor(
         fetchChatRooms()
     }
 
-
-
-
-
-
-
-
-
     // Modify the fetchChatRooms function
     fun fetchChatRooms(forceRefresh: Boolean = false) {
         viewModelScope.launch {

@@ -13,9 +13,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VolumeOff
@@ -207,9 +209,9 @@ fun ChatRoomListScreen(
                     isLoading = isLoading
                 )
             }
-
+/*
             // Using the external CreateRoomBottomSheet component
-            CreateRoomBottomSheet(
+           *//* CreateRoomBottomSheet(
                 show = showCreateRoomSheet,
                 onDismiss = {
                     showCreateRoomSheet = false
@@ -224,7 +226,7 @@ fun ChatRoomListScreen(
                     }
                 },
                 isLoading = creationState is ChatRoomListViewModel.RoomCreationState.Loading
-            )
+            )*/
         }
     }
 
@@ -569,13 +571,20 @@ private fun EmptyState(onRefresh: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = stringResource(R.string.no_chat_rooms),
-            style = MaterialTheme.typography.bodyLarge
+        // Icon above the text
+        Icon(
+            imageVector = Icons.Filled.Chat,
+            contentDescription = "No chats available",
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.primary
         )
         Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onRefresh) {
-            Text(stringResource(R.string.refresh))
-        }
+
+        // Text with clickable refresh action
+        Text(
+            text = stringResource(R.string.no_chat_rooms),
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.clickable(onClick = onRefresh)
+        )
     }
 }
