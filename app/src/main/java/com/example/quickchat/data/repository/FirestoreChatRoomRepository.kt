@@ -14,6 +14,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -37,27 +38,16 @@ class FirestoreChatRoomRepository @Inject constructor(
 
     // In FirestoreChatRoomRepository.kt
     override fun getChatRooms(userId: String): Flow<List<ChatRoom>> {
-        return callbackFlow {
-            // Always emit from local DB first
-            chatRoomDao.getChatRooms(userId)
-                .first()
-                .let { trySend(it) }
-
-            // Merge with remote updates
-            merge(
-                chatRoomDao.getChatRooms(userId),
-                getRemoteChatRooms(userId)
-            )
-                .collect { rooms ->
-                    trySend(rooms.filter {
-                        !it.isArchived &&
-                                !it.isDeleted &&
-                                it.participants.contains(userId)
-                    })
+        return chatRoomDao.getChatRooms(userId)
+            .combine(getRemoteChatRooms(userId)) { local, remote ->
+                remote.onEach { remoteRoom ->
+                    // Ensure local unread counts are preserved
+                    local.find { it.roomId == remoteRoom.roomId }?.let { localRoom ->
+                        remoteRoom.unreadCount = localRoom.unreadCount
+                    }
                 }
-        }
+            }
     }
-
 
 
     suspend fun addFcmTokenToRoom(roomId: String, userId: String, token: String) {
@@ -340,33 +330,28 @@ class FirestoreChatRoomRepository @Inject constructor(
             throw e
         }
     }
+// In FirestoreChatRoomRepository.kt
+
     override suspend fun incrementUnreadCount(roomId: String, userId: String) {
         try {
-            Log.d("UNREAD_DEBUG", "⏩ Starting incrementUnreadCount for room $roomId, user $userId")
+            // 1. Update Firestore atomically
+            firestore.runTransaction { transaction ->
+                val docRef = firestore.collection(CHATROOMS_COLLECTION).document(roomId)
+                val currentCount = (transaction.get(docRef).get("unreadCount_$userId") as? Long) ?: 0L
+                transaction.update(docRef, "unreadCount_$userId", currentCount + 1)
+                transaction.update(docRef, "lastUpdated", FieldValue.serverTimestamp())
+            }.await()
 
-            // 1. Update Firestore
-            Log.d("UNREAD_DEBUG", " Updating Firestore...")
-            firestore.collection(CHATROOMS_COLLECTION)
-                .document(roomId)
-                .update("unreadCount_$userId", FieldValue.increment(1))
-                .await()
-            Log.d("UNREAD_DEBUG", "✅ Firestore updated successfully")
-
-            // 2. Update local database
-            Log.d("UNREAD_DEBUG", "💾 Updating local DB...")
+            // 2. Update local DB
             chatRoomDao.getRoomById(roomId)?.let { room ->
-                val newCount = (room.unreadCount ?: 0) + 1
-                Log.d("UNREAD_DEBUG", " New count will be: $newCount")
-                chatRoomDao.insertAll(listOf(room.copy(unreadCount = newCount)))
-                Log.d("UNREAD_DEBUG", " Local DB updated successfully")
-            } ?: run {
-                Log.e("UNREAD_DEBUG", " Room not found in local DB!")
+                chatRoomDao.updateUnreadCount(roomId, userId, room.unreadCount + 1)
             }
         } catch (e: Exception) {
-            Log.e("UNREAD_DEBUG", " Error in incrementUnreadCount: ${e.message}", e)
+            Log.e(TAG, "Error incrementing unread count", e)
             throw e
         }
     }
+
     override suspend fun markMessagesAsRead(roomId: String, userId: String) {
         try {
             Log.d("UNREAD_DEBUG", "⏩ Starting markMessagesAsRead for room $roomId, user $userId")

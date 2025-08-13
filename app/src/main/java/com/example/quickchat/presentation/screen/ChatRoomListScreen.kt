@@ -58,8 +58,6 @@ fun ChatRoomListScreen(
     }
 
 
-
-
     val rooms by viewModel.chatRooms.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -494,6 +492,7 @@ fun ChatRoomListItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            val unreadCount by rememberUpdatedState(room.unreadCount)
 
             Column(horizontalAlignment = Alignment.End) {
                 Text(

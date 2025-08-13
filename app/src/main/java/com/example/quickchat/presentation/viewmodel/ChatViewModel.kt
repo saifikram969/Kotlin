@@ -1,22 +1,27 @@
 package com.example.quickchat.presentation.viewmodel
 
-import android.R.id.message
-import android.util.Log
-import androidx.compose.runtime.mutableStateListOf
+ import android.app.Application
+ import android.util.Log
+ import android.widget.Toast
+ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.ViewModel
+ import com.google.firebase.messaging.FirebaseMessaging
 import androidx.lifecycle.viewModelScope
+import com.example.quickchat.data.local.AppUserEntity
 import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.MessageStatus
 import com.example.quickchat.data.model.MessageType
 import com.example.quickchat.data.repository.ChatRepository
 import com.example.quickchat.data.repository.ChatRoomRepository
 import com.example.quickchat.data.repository.PresenceRepository
+import com.example.quickchat.data.repository.UserRepository
 import com.example.quickchat.utils.ConnectivityObserver
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.firestore
-import kotlinx.coroutines.delay
+ import io.grpc.Context
+ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -25,10 +30,12 @@ import java.util.*
 private const val CHATROOMS_COLLECTION = "chatrooms"
 
 class ChatViewModel(
-    private val repository: ChatRepository,
+    val repository: ChatRepository,
     private val chatRoomRepository: ChatRoomRepository,
     private val presenceRepository: PresenceRepository,
-    private val connectivityObserver: ConnectivityObserver
+    private val connectivityObserver: ConnectivityObserver,
+    private val userRepository: UserRepository,
+    private val application: Application
 
 ) : ViewModel() {
 
@@ -56,6 +63,9 @@ class ChatViewModel(
     private val _uploadingMessages = mutableStateMapOf<String, ChatMessage>()
     val uploadingMessages: Map<String, ChatMessage> get() = _uploadingMessages
 
+    private val _networkStatus = MutableStateFlow(true)
+    val networkStatus: StateFlow<Boolean> = _networkStatus
+
     private var currentRoomId: String? = null
     private var currentUserId: String? = null
     private var otherUserId: String? = null
@@ -67,14 +77,135 @@ class ChatViewModel(
     private val _tempMessages = mutableStateListOf<ChatMessage>()
     val tempMessages: List<ChatMessage> get() = _tempMessages
 
+    private val _showNameDialog = MutableStateFlow(false)
+    val showNameDialog: StateFlow<Boolean> = _showNameDialog
 
+
+    private val  _currentUser = MutableStateFlow<AppUserEntity?>(null)
+    val currentUser: StateFlow<AppUserEntity?> = _currentUser
+
+    init {
+        viewModelScope.launch {
+            currentUserId?.let { deviceId ->
+                initializeUser(deviceId)
+                checkAndRequestName(deviceId)
+            }
+        }
+    }
+    fun checkAndRequestName(deviceId: String) {
+        viewModelScope.launch {
+            try {
+                val firestoreName = repository.getUserNameFromDevice(deviceId)
+                val localUser = userRepository.getUser(deviceId)
+
+                Log.d("NameCheck", "Firestore name: $firestoreName | Local name: ${localUser?.name}")
+
+                val shouldShow = firestoreName == null &&
+                        (localUser?.isNameSet != true || hasFcmTokenChanged(deviceId))
+
+                _showNameDialog.value = shouldShow
+                if (firestoreName == null && localUser?.isNameSet == true) {
+                    userRepository.markNameSet(deviceId, false)
+                }
+            } catch (e: Exception) {
+                Log.e("carn", "Name check failed", e)
+                _showNameDialog.value = true
+            }
+        }
+    }
+
+    fun storeUserName(deviceId: String, name: String) {
+        if (name.isBlank()) {
+            Toast.makeText(application, "Name cannot be empty", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val token = FirebaseMessaging.getInstance().token.await()
+                userRepository.updateUserName(deviceId, name)
+                var retries = 3
+                var success = false
+
+                while (retries > 0 && !success) {
+                    repository.storeFcmTokenWithName(deviceId, token, name)
+                    delay(1000)
+                    val storedName = repository.getUserNameFromDevice(deviceId)
+                    success = storedName == name
+                    retries--
+                }
+
+                if (!success) throw Exception("Failed after 3 retries")
+
+                userRepository.markNameDialogShown(deviceId, true)
+                _showNameDialog.value = false
+
+            } catch (e: Exception) {
+                Log.e("sun", "Name storage failed", e)
+                userRepository.markNameSet(deviceId, false)
+                _showNameDialog.value = true
+            }
+        }
+    }
+
+    private suspend fun hasFcmTokenChanged(deviceId: String): Boolean {
+        return try {
+            val currentToken = FirebaseMessaging.getInstance().token.await()
+            val storedToken = repository.getFcmToken(deviceId)
+            storedToken != currentToken
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "Error checking FCM token", e)
+            true
+        }
+    }
+
+    suspend fun initializeUserWithToken(deviceId: String, token: String) {
+        val existingData = repository.getDeviceData(deviceId)
+        if (existingData?.fcmToken == token) {
+            userRepository.syncWithFirestore(deviceId, existingData.userName)
+            return
+        }
+        userRepository.createUserIfNotExists(deviceId)
+        repository.storeFcmToken(deviceId, token)
+    }
+
+
+    suspend fun initializeUser(deviceId: String) {
+        try {
+            val currentToken = FirebaseMessaging.getInstance().token.await()
+            val tokenChanged = hasFcmTokenChanged(deviceId)
+            val firestoreName = repository.getUserNameFromDevice(deviceId)
+            val localUser = userRepository.getUser(deviceId)
+            when {
+                tokenChanged -> {
+                    Log.d("UserInit", "FCM token changed - treating as fresh install")
+                    userRepository.createUserIfNotExists(deviceId)
+                    repository.storeFcmToken(deviceId, currentToken)
+                    userRepository.markNameDialogShown(deviceId, false)
+                }
+
+                firestoreName != null && (localUser == null || !localUser.isNameSet) -> {
+                    Log.d("UserInit", "Syncing name from Firestore to local")
+                    userRepository.syncWithFirestore(deviceId, firestoreName)
+                }
+
+                localUser != null && localUser.isNameSet && firestoreName == null -> {
+                    Log.d("UserInit", "Pushing local name to Firestore")
+                    repository.storeFcmTokenWithName(deviceId, currentToken, localUser.name ?: "")
+                }
+
+                else -> {
+                    Log.d("UserInit", "No initialization needed")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "Error initializing user", e)
+        }
+    }
 
     init {
         setupStatusTracking()
     }
-
-    private val _networkStatus = MutableStateFlow(true)
-    val networkStatus: StateFlow<Boolean> = _networkStatus
 
     init {
         observeNetworkStatus()
@@ -146,7 +277,7 @@ class ChatViewModel(
             presenceRepository.observeUserPresence(userId)
                 .onStart {
                     Log.d("ChatViewModel", "Starting presence observation for user: $userId")
-                    _presenceStatus.value = null // Reset while loading
+                    _presenceStatus.value = null
                 }
                 .catch { e ->
                     Log.e("ChatViewModel", "Error observing presence for $userId", e)
@@ -159,7 +290,6 @@ class ChatViewModel(
                     )
                     _presenceStatus.value = isOnline
 
-                    // Update UI state if needed
                     _uiState.update { currentState ->
                         if (currentState is ChatUiState.Success) {
                             currentState.copy()
@@ -238,17 +368,20 @@ class ChatViewModel(
         viewModelScope.launch {
             _uiState.value = ChatUiState.Loading
 
+            // Always show cached messages first
             val cachedMessages = repository.getCachedMessages(roomId)
             if (cachedMessages.isNotEmpty()) {
                 _uiState.value = ChatUiState.Success(
                     messages = cachedMessages,
                     currentUserId = currentUserId,
-                    roomId = roomId
+                    roomId = roomId,
+                    isOffline = !networkStatus.value
                 )
             }
 
-            if (networkStatus.value == true) {
+            if (networkStatus.value) {
                 try {
+                    // Sync with server when online
                     repository.syncMissingMessages(roomId)
                     val updatedMessages = repository.getCachedMessages(roomId)
                     _uiState.value = if (updatedMessages.isNotEmpty()) {
@@ -281,7 +414,8 @@ class ChatViewModel(
                 )
             }
 
-            if (networkStatus.value == true) {
+            // Setup listener for real-time updates
+            if (networkStatus.value) {
                 repository.listenToMessages(roomId).collect { messages ->
                     _uiState.value = ChatUiState.Success(
                         messages = messages.sortedBy { it.timestamp },
@@ -292,6 +426,8 @@ class ChatViewModel(
             }
         }
     }
+
+
 
     fun addUploadingMessage(message: ChatMessage) {
         _uploadingMessages[message.id] = message
@@ -522,10 +658,7 @@ class ChatViewModel(
                     )
                     .await()
 
-                // 2. Clear local cache
                 repository.clearRoomCache(roomId)
-
-                // 3. Update UI state - changed from Empty to Loading
                 if (_uiState.value is ChatUiState.Success &&
                     (_uiState.value as ChatUiState.Success).roomId == roomId
                 ) {
@@ -541,8 +674,6 @@ class ChatViewModel(
             }
         }
     }
-
-    // Add this to your ViewModel's properties
     private val _refreshChatList = MutableStateFlow(false)
     val refreshChatList: StateFlow<Boolean> = _refreshChatList
     private suspend fun sendDeletionNotification(
@@ -551,17 +682,13 @@ class ChatViewModel(
         recipientId: String
     ) {
         try {
-            // Get recipient's FCM token
             val recipientToken = repository.getFcmToken(recipientId) ?: return
-
-            // Get sender's name
             val senderName = Firebase.firestore.collection("users")
                 .document(senderId)
                 .get()
                 .await()
                 .getString("name") ?: senderId
 
-            // Prepare notification payload
             val payload = mapOf(
                 "to" to recipientToken,
                 "notification" to mapOf(
@@ -575,8 +702,6 @@ class ChatViewModel(
                     "senderId" to senderId
                 )
             )
-
-            // Send notification (you might want to send this to your backend instead)
             Firebase.firestore.collection("notification_requests")
                 .add(payload)
                 .await()
@@ -584,8 +709,6 @@ class ChatViewModel(
             Log.e("ChatViewModel", "Error sending deletion notification", e)
         }
     }
-
-    // delete user in chatroom with all chats deleted
     fun deleteChatroomForUser(
         roomId: String,
         userId: String,
@@ -593,7 +716,6 @@ class ChatViewModel(
     ) {
         viewModelScope.launch {
             try {
-                // 1. Remove the user from participants
                 Firebase.firestore.collection(CHATROOMS_COLLECTION)
                     .document(roomId)
                     .update(
@@ -604,10 +726,7 @@ class ChatViewModel(
                     )
                     .await()
 
-                // Delete all messages sent by this user
                 deleteUserMessages(roomId, userId)
-
-                // Clear from local DB (both room + messages)
                 repository.clearRoomCache(roomId)
                 repository.clearMessagesForUserInRoom(
                     roomId,
@@ -686,7 +805,8 @@ sealed class ChatUiState {
         val currentUserId: String,
         val roomId: String,
         val typingUserId: String? = null,
-        val isOffline: Boolean = false
+        val isOffline: Boolean = false,
+        val pendingMessages: List<ChatMessage> = emptyList()
     ) : ChatUiState()
 
     data class Error(val message: String) : ChatUiState()

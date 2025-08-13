@@ -123,6 +123,9 @@ fun ChatScreen(
             viewModel.updateTypingStatus(roomId, currentUserId, false)
         }
     }
+
+
+
     // Combined initialization and cleanup effect
     DisposableEffect(roomId, currentUserId, otherUserId) {
         // Initialization

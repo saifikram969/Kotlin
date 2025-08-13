@@ -10,14 +10,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.quickchat.data.model.ChatRoom
 
 @Database(
-    entities = [ChatMessageEntity::class, ChatRoom::class], // Include both entities
-    version = 18, // Increment version since we're changing schema
+    entities = [ChatMessageEntity::class, ChatRoom::class, AppUserEntity::class],
+    version = 20, //
     exportSchema = true
 )
-@TypeConverters(Converters::class) // Add this for List<String> conversion
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun chatRoomDao(): ChatRoomDao
+    abstract fun userDao(): UserDao
 
 
 
@@ -421,6 +422,24 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("DROP TABLE chat_rooms")
                 database.execSQL("ALTER TABLE new_chat_rooms RENAME TO chat_rooms")
             }
+        }
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Create the new app_user table
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS app_user (
+                        deviceId TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        isNameSet INTEGER NOT NULL DEFAULT 0,
+                        createdAt INTEGER NOT NULL
+                    )
+                """)
+            }
+        }
+    }
+    val MIGRATION_1_2 = object : Migration(19, 20) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE app_user ADD COLUMN hasShownNameDialog INTEGER NOT NULL DEFAULT 0")
         }
     }
 }

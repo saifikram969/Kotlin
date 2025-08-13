@@ -33,6 +33,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
+import java.util.Date
 import javax.inject.Inject
 import kotlin.text.get
 
@@ -41,7 +42,11 @@ private val USERS_COLLECTION = "users"
 private const val DEVICES_COLLECTION = "devices"
 
 private const val TAG = "ChatRepository"
-
+data class DeviceData(
+    val fcmToken: String?,
+    val userName: String?,
+    val lastUpdated: Date?
+)
 class ChatRepository @Inject constructor(
     private val database: FirebaseFirestore,
     private val chatMessageDao: ChatMessageDao
@@ -55,6 +60,29 @@ class ChatRepository @Inject constructor(
     }
 
     // ==================== Message Status Tracking Enhancements ====================
+
+
+
+    suspend fun getDeviceData(deviceId: String): DeviceData? {
+        return try {
+            val doc = database.collection("devices")
+                .document(deviceId)
+                .get()
+                .await()
+
+            if (doc.exists()) {
+                DeviceData(
+                    fcmToken = doc.getString("fcmToken"),
+                    userName = doc.getString("userName"),
+                    lastUpdated = doc.getDate("lastUpdated")
+                )
+            } else null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting device data", e)
+            null
+        }
+    }
+
 
     suspend fun sendMessageWithStatusTracking(roomId: String, message: ChatMessage): Result<Unit> {
 
@@ -353,6 +381,63 @@ class ChatRepository @Inject constructor(
             true
         } catch (e: Exception) {
             false
+        }
+    }
+
+
+
+    // Add this to your ChatRepository class
+    suspend fun storeFcmTokenWithName(
+        deviceId: String,
+        token: String,
+        userName: String
+    ): Boolean {
+        return try {
+            Log.d("FCM_DEBUG", "Storing token and name for device: $deviceId")
+
+            // Step 1: Get existing document first
+            val docRef = database.collection("devices").document(deviceId)
+            val existingDoc = docRef.get().await()
+
+            val existingName = existingDoc.getString("userName")
+
+            // Step 2: Decide final name (avoid overwriting with blank)
+            val finalName = if (userName.isNotBlank()) {
+                userName
+            } else {
+                existingName ?: "" // Keep old name if exists
+            }
+
+            // Step 3: Prepare data
+            val tokenData = hashMapOf(
+                "fcmToken" to token,
+                "userName" to finalName,
+                "lastUpdated" to FieldValue.serverTimestamp(),
+                "deviceId" to deviceId
+            )
+
+            // Step 4: Merge with existing data (no field loss)
+            docRef.set(tokenData, SetOptions.merge()).await()
+
+            Log.d("FCM_DEBUG", "Token & name stored successfully for $deviceId")
+            true
+        } catch (e: Exception) {
+            Log.e("FCM_DEBUG", "Error storing token with name", e)
+            false
+        }
+    }
+
+    // In ChatRepository
+    suspend fun getUserNameFromDevice(deviceId: String): String? {
+        return try {
+            database.collection("devices")
+                .document(deviceId)
+                .get()
+                .await()
+                .getString("userName")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting user name", e)
+            null
         }
     }
 

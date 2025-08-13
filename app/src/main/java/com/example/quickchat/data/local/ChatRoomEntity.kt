@@ -4,7 +4,6 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.example.quickchat.data.model.ChatRoom
 
-
 @Entity(tableName = "chat_rooms")
 data class ChatRoomEntity(
     @PrimaryKey

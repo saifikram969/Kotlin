@@ -5,12 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.quickchat.data.model.ChatRoom
 import com.example.quickchat.data.repository.ChatRepository
 import com.example.quickchat.data.repository.ChatRoomRepository
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -22,7 +20,6 @@ class ChatRoomListViewModel @Inject constructor(
     private val userId: String
 ) : ViewModel() {
 
-    // Chat Rooms State
     private val _chatRooms = MutableStateFlow<List<ChatRoom>>(emptyList())
     val chatRooms: StateFlow<List<ChatRoom>> = _chatRooms
         .stateIn(
@@ -31,17 +28,9 @@ class ChatRoomListViewModel @Inject constructor(
             initialValue = emptyList()
         )
 
-
-
-
-    // Add this new function to manually refresh
     fun refreshChatRooms(forceRefresh: Boolean = false) {
         fetchChatRooms(forceRefresh)
     }
-
-
-
-
     // Loading State
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
@@ -69,6 +58,14 @@ class ChatRoomListViewModel @Inject constructor(
         println("ViewModel initialized with userId: $userId")
         fetchChatRooms()
     }
+
+
+
+
+
+
+
+
 
     // Modify the fetchChatRooms function
     fun fetchChatRooms(forceRefresh: Boolean = false) {
@@ -291,51 +288,43 @@ class ChatRoomListViewModel @Inject constructor(
     }
 
     fun onNewMessageReceived(roomId: String, message: String) {
-        Log.d("lao", " New message received in room $roomId")
         viewModelScope.launch {
             try {
-                val currentRoom = _chatRooms.value.firstOrNull { it.roomId == roomId }
+                val currentRooms = _chatRooms.value
+                val currentRoom = currentRooms.firstOrNull { it.roomId == roomId }
 
                 if (currentRoom != null) {
-                    if (!currentRoom.isMuted) {
-                        Log.d("lalo", " Room is not muted, incrementing count")
-                        repository.incrementUnreadCount(roomId, userId)
-
-                        _chatRooms.value = _chatRooms.value.map { room ->
-                            if (room.roomId == roomId) {
-                                val newCount = room.unreadCount + 1
-                                Log.d("lalo", " Updating UI count to $newCount")
+                    // Always update last message and timestamp
+                    val updatedRooms = currentRooms.map { room ->
+                        if (room.roomId == roomId) {
+                            if (!room.isMuted) {
+                                // Only increment if not muted
+                                repository.incrementUnreadCount(roomId, userId)
                                 room.copy(
                                     lastMessage = message,
                                     lastTimestamp = System.currentTimeMillis(),
-                                    unreadCount = newCount
+                                    unreadCount = room.unreadCount + 1
                                 )
                             } else {
-                                room
-                            }
-                        }
-                    } else {
-                        Log.d("lalo", " Room is muted, not incrementing count")
-                        _chatRooms.value = _chatRooms.value.map { room ->
-                            if (room.roomId == roomId) {
+                                // Just update message info without incrementing count
                                 room.copy(
                                     lastMessage = message,
                                     lastTimestamp = System.currentTimeMillis()
                                 )
-                            } else {
-                                room
                             }
+                        } else {
+                            room
                         }
                     }
-                } else {
-                    Log.e("lalo", " Room $roomId not found in UI state!")
+
+                    // Update state with new list
+                    _chatRooms.value = updatedRooms
                 }
             } catch (e: Exception) {
-                Log.e("lalo", " Error in onNewMessageReceived: ${e.message}", e)
+                Log.e("ChatRoomListVM", "Error handling new message", e)
             }
         }
-    }
-    // link join with user
+    }    // link join with user
 // Add these to ChatRoomListViewModel.kt
     private val _shareLinkState = MutableStateFlow<ShareLinkState>(ShareLinkState.Idle)
     val shareLinkState: StateFlow<ShareLinkState> = _shareLinkState

@@ -11,8 +11,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -21,12 +19,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.rememberNavController
 import com.example.quickchat.navigation.ChatAppNavHost
 import com.example.quickchat.navigation.Routes
+import com.example.quickchat.presentation.component.NameInputDialog
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
 import com.example.quickchat.ui.theme.QuickChatTheme
 import com.example.quickchat.utils.DeviceIdHelper
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.tasks.await
 import org.koin.androidx.compose.koinViewModel
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 
 class MainActivity : ComponentActivity() {
     private val TAG = "MainActivity"
@@ -51,22 +53,45 @@ class MainActivity : ComponentActivity() {
             val viewModel: ChatViewModel = koinViewModel()
             val context = LocalContext.current
             val deviceId = remember { DeviceIdHelper.getDeviceId(context) }
+            val showNameDialog by viewModel.showNameDialog.collectAsState()
 
+            // Check if name dialog should be shown
             LaunchedEffect(Unit) {
+                viewModel.checkAndRequestName(deviceId)
+
                 try {
+
                     val token = FirebaseMessaging.getInstance().token.await()
-                    viewModel.storeFcmToken(deviceId, token)
+                    Log.d(TAG, "FCM Token: $token")
+
+                    viewModel.initializeUserWithToken(deviceId, token)
+
+
                 } catch (e: Exception) {
-                    Log.e(TAG, "FCM token initialization failed", e)
+                    Log.e(TAG, "Initialization failed", e)
+                    // Fallback - check name anyway
+                    viewModel.checkAndRequestName(deviceId)
                 }
             }
 
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.background
-            ) {
-                ChatAppNavHost(navController = navController)
-                HandleDeepLinks(navController, currentUserId, viewModel)
+            Box(modifier = Modifier.fillMaxSize()) {
+                ChatAppNavHost(
+                    navController = navController,
+                    deviceId = deviceId,
+                    showNameDialog = showNameDialog,
+                    viewModel = viewModel
+                )
+
+                if (showNameDialog) {
+                    NameInputDialog(
+                        deviceId = deviceId,
+                        onDismiss = { name ->
+                            if (name.isNotBlank()) {
+                                viewModel.storeUserName(deviceId, name)
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -108,6 +133,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         // Handled in HandleDeepLinks composable
     }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(

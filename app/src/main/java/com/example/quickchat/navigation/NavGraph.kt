@@ -1,23 +1,39 @@
-// package com.example.quickchat.navigation
 package com.example.quickchat.navigation
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.example.quickchat.presentation.ChatRoomListScreen.ChatRoomListScreen
+import com.example.quickchat.presentation.component.NameInputDialog
 import com.example.quickchat.presentation.screen.ChatScreen
+import com.example.quickchat.presentation.viewmodel.ChatViewModel
 
 object Routes {
-    const val USER_SELECTION = "user_selection"
+    //const val USER_SELECTION = "user_selection"
+    const val NAME_DIALOG = "name_dialog/{deviceId}"
     const val CHAT_ROOMS = "chat_rooms/{userId}"
     const val CHAT_SCREEN = "chat/{currentUserId}/{roomId}/{otherUserId}"
 
+    fun nameDialogRoute(deviceId: String) = "name_dialog/$deviceId"
     fun chatRoomsRoute(userId: String) = "chat_rooms/$userId"
     fun chatScreenRoute(currentUserId: String, roomId: String, otherUserId: String) =
         "chat/$currentUserId/$roomId/$otherUserId"
@@ -26,20 +42,25 @@ object Routes {
 @Composable
 fun ChatAppNavHost(
     navController: NavHostController,
-    startDestination: String = Routes.USER_SELECTION
+    deviceId: String,
+    showNameDialog: Boolean,
+    viewModel: ChatViewModel,
+    startDestination: String = Routes.nameDialogRoute(deviceId)
 ) {
+    val viewModel: ChatViewModel = viewModel()
     NavHost(
         navController = navController,
-        startDestination = startDestination
-    ) {
-        composable(Routes.USER_SELECTION) {
-            UserSelectionScreen { selectedUserId ->
-                navController.navigate(Routes.chatRoomsRoute(selectedUserId)) {
-                    // Clear back stack to prevent going back to user selection
-                    popUpTo(Routes.USER_SELECTION) { inclusive = true }
-                }
-            }
+        startDestination = if (showNameDialog) {
+            Routes.NAME_DIALOG
+        } else {
+            Routes.CHAT_ROOMS.replace("{userId}", deviceId)
         }
+    ) {
+        composable(Routes.NAME_DIALOG) { backStackEntry ->
+            // Empty composable - dialog is shown in MainActivity
+            Box(modifier = Modifier.fillMaxSize())
+        }
+
 
         composable(Routes.CHAT_ROOMS) { backStackEntry ->
             val userId = backStackEntry.arguments?.getString("userId").orEmpty()
@@ -69,28 +90,77 @@ fun ChatAppNavHost(
     }
 }
 
-@Composable
+/*@Composable
 fun UserSelectionScreen(onUserSelected: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Button(
-            onClick = { onUserSelected("user1") },
-            modifier = Modifier.fillMaxWidth()
+        // Top Text
+        Text(
+            text = "Testing mode",
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            ),
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
+
+        // User 1 Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onUserSelected("user1") },
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
-            Text("Login as User 1")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "User 1",
+                    tint = Color.Gray,
+                    modifier = Modifier.size(48.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = "Login as User 1",
+                    style = MaterialTheme.typography.bodyLarge.copy(color = Color.Gray)
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        Button(
-            onClick = { onUserSelected("user2") },
-            modifier = Modifier.fillMaxWidth()
+        // User 2 Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onUserSelected("user2") },
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
-            Text("Login as User 2")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "User 2",
+                    tint = Color.Gray,
+                    modifier = Modifier.size(48.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = "Login as User 2",
+                    style = MaterialTheme.typography.bodyLarge.copy(color = Color.Gray)
+                )
+            }
         }
-    }
-}
+    }*/
+//}

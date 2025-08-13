@@ -11,7 +11,7 @@ data class ChatRoom(
     val name: String,
     val lastMessage: String? = null,
     val lastTimestamp: Long = 0L,
-    val unreadCount: Int = 0,
+    var unreadCount: Int = 0,
     val userId: String,
     val participants: List<String> = emptyList(),
     val lastRead: Long = 0L,
