@@ -1,28 +1,13 @@
 package com.example.quickchat.navigation
-
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.example.quickchat.presentation.ChatRoomListScreen.ChatRoomListScreen
+import com.example.quickchat.presentation.component.GroupMemberManagementScreen
 import com.example.quickchat.presentation.component.NameInputDialog
 import com.example.quickchat.presentation.screen.ChatScreen
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
@@ -32,11 +17,15 @@ object Routes {
     const val NAME_DIALOG = "name_dialog/{deviceId}"
     const val CHAT_ROOMS = "chat_rooms/{userId}"
     const val CHAT_SCREEN = "chat/{currentUserId}/{roomId}/{otherUserId}"
+    const val GROUP_MANAGEMENT = "group_management/{roomId}/{currentUserId}"
 
     fun nameDialogRoute(deviceId: String) = "name_dialog/$deviceId"
     fun chatRoomsRoute(userId: String) = "chat_rooms/$userId"
     fun chatScreenRoute(currentUserId: String, roomId: String, otherUserId: String) =
         "chat/$currentUserId/$roomId/$otherUserId"
+
+    fun groupManagementRoute(roomId: String, currentUserId: String) =
+        "group_management/$roomId/$currentUserId"
 }
 
 @Composable
@@ -84,9 +73,23 @@ fun ChatAppNavHost(
                 currentUserId = currentUserId,
                 roomId = roomId,
                 otherUserId = otherUserId,
-                onBackClick = { navController.navigateUp() }
+                onBackClick = { navController.navigateUp() },
+                navController = navController
             )
         }
+
+        composable(Routes.GROUP_MANAGEMENT) { backStackEntry ->
+            val roomId = backStackEntry.arguments?.getString("roomId") ?: ""
+            val currentUserId = backStackEntry.arguments?.getString("currentUserId") ?: ""
+
+            GroupMemberManagementScreen(
+                roomId = roomId,
+                currentUserId = currentUserId,
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+
+
     }
 }
 

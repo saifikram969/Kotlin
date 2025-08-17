@@ -1,5 +1,6 @@
 package com.example.quickchat.presentation.component
 
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,7 +15,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -33,16 +33,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,21 +50,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.quickchat.presentation.viewmodel.ChatViewModel
-import com.example.quickchat.ui.theme.QuickChatTheme
-
-// Dummy data for preview
-val dummyUsers = listOf(
-    User("1", "Alice Johnson", "https://example.com/avatar1.jpg"),
-    User("2", "Bob Smith", null),
-    User("3", "Charlie Brown", "https://example.com/avatar3.jpg"),
-    User("4", "Diana Prince", null),
-    User("5", "Ethan Hunt", "https://example.com/avatar5.jpg"),
-    User("6", "Fiona Green", null),
-    User("7", "George Wilson", "https://example.com/avatar7.jpg")
-)
+import com.example.quickchat.data.model.User
+import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,13 +64,23 @@ fun CreateRoomBottomSheet(
     onRoomTitleChange: (String) -> Unit,
     initialMembers: List<User> = emptyList(),
     onMemberSelectionChange: (User, Boolean) -> Unit = { _, _ -> },
-    availableUsers: List<User> = dummyUsers,
     onCreateClick: () -> Unit = {},
+    isGroup: Boolean = false,
     isLoading: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: ChatRoomListViewModel
 ) {
     val density = LocalDensity.current
     var showMemberSelection by remember { mutableStateOf(false) }
+
+    val availableUsers by viewModel.availableUsers.collectAsState()
+    val isLoadingUsers by viewModel.isLoadingUsers.collectAsState()
+
+    LaunchedEffect(show) {
+        if (show) {
+            viewModel.loadAvailableUsers("temp")
+        }
+    }
 
     AnimatedVisibility(
         visible = show,
@@ -100,21 +99,21 @@ fun CreateRoomBottomSheet(
                 modifier = Modifier.padding(16.dp)
             ) {
                 Text(
-                    text = "Create Group Chat",
+                    text = if (isGroup) "Create Group Chat" else "New Chat",
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
-                OutlinedTextField(
-                    value = roomTitle,
-                    onValueChange = onRoomTitleChange,
-                    label = { Text("Room name") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (isGroup) {
+                    OutlinedTextField(
+                        value = roomTitle,
+                        onValueChange = onRoomTitleChange,
+                        label = { Text("Group name") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Selected members chips
                 if (initialMembers.isNotEmpty()) {
                     Text(
                         text = "Selected Members:",
@@ -136,12 +135,13 @@ fun CreateRoomBottomSheet(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                // Add members button
                 Button(
                     onClick = { showMemberSelection = true },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add members")
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text("Add Members")
                 }
 
@@ -162,7 +162,8 @@ fun CreateRoomBottomSheet(
 
                     Button(
                         onClick = onCreateClick,
-                        enabled = roomTitle.isNotBlank() && !isLoading
+                        enabled = if (isGroup) roomTitle.isNotBlank() && initialMembers.isNotEmpty()
+                        else initialMembers.isNotEmpty() && !isLoading
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
@@ -171,7 +172,7 @@ fun CreateRoomBottomSheet(
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
                         } else {
-                            Text("Create Group")
+                            Text(if (isGroup) "Create Group" else "Start Chat")
                         }
                     }
                 }
@@ -179,12 +180,14 @@ fun CreateRoomBottomSheet(
         }
     }
 
-    // Member selection dialog
     if (showMemberSelection) {
         MemberSelectionDialog(
+            isLoading = isLoadingUsers,
             availableUsers = availableUsers,
             selectedUsers = initialMembers,
-            onSelectionChange = onMemberSelectionChange,
+            onUserSelected = { user ->
+                onMemberSelectionChange(user, !initialMembers.contains(user))
+            },
             onDismiss = { showMemberSelection = false }
         )
     }
@@ -206,7 +209,6 @@ private fun MemberChip(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
         ) {
-            // User avatar or initials
             Box(
                 modifier = Modifier
                     .size(24.dp)
@@ -217,7 +219,7 @@ private fun MemberChip(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = user.name.take(2).uppercase(),
+                    text = user.userName.take(2).uppercase(),
                     color = MaterialTheme.colorScheme.onPrimary,
                     style = MaterialTheme.typography.labelSmall
                 )
@@ -226,7 +228,7 @@ private fun MemberChip(
             Spacer(modifier = Modifier.width(8.dp))
 
             Text(
-                text = user.name,
+                text = user.userName,
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1
             )
@@ -245,7 +247,7 @@ private fun MemberChip(
         }
     }
 }
-
+/*
 @Composable
 private fun MemberSelectionDialog(
     availableUsers: List<User>,
@@ -307,14 +309,11 @@ private fun MemberSelectionDialog(
             }
         }
     )
-}
+}*/
 
-data class User(
-    val id: String,
-    val name: String,
-    val avatarUrl: String? = null
-)
+
 // Replace all preview-related code at the bottom with these implementations:
+/*
 
 @Preview(showBackground = true, showSystemUi = true)
 @Composable
@@ -339,7 +338,9 @@ fun CreateRoomBottomSheetPreview() {
                     }
                 },
                 availableUsers = dummyUsers,
-                onCreateClick = { /* Handle create */ },
+                onCreateClick = { */
+/* Handle create *//*
+ },
                 isLoading = false
             )
         }
@@ -374,4 +375,4 @@ fun MemberSelectionDialogPreview() {
             )
         }
     }
-}
+}*/

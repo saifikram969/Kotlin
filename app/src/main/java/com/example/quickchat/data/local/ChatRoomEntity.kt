@@ -2,32 +2,54 @@ package com.example.quickchat.data.local
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-import com.example.quickchat.data.model.ChatRoom
-
 @Entity(tableName = "chat_rooms")
-data class ChatRoomEntity(
+data class ChatRoom(
     @PrimaryKey
     val roomId: String,
     val name: String,
-    val lastMessage: String?,
-    val lastTimestamp: Long,
-    val unreadCount: Int,
+    val lastMessage: String? = null,
+    val lastTimestamp: Long = 0L,
+    var unreadCount: Int = 0,
     val userId: String,
-    val lastRead: Long,
-    val fcmTokens: String = "{}"
+    val participants: List<String> = emptyList(),
+    val lastRead: Long = 0L,
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val isLocal: Boolean = false,
+    val isArchived: Boolean = false,
+    val isDeleted: Boolean = false,
+    val isMuted: Boolean = false,
+    val isProcessingMute: Boolean = false,
+    val pendingMuteState: Boolean? = null,
+    val fcmTokens: Map<String, String> = emptyMap(),
+    val type: String = "dm", // "dm" or "group"
+    val createdBy: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val admins: List<String> = emptyList() // For group chats only
 ) {
-    fun toChatRoom(participants: List<String>): ChatRoom {
-        return ChatRoom(
-            roomId = roomId,
-            name = name,
-            lastMessage = lastMessage,
-            lastTimestamp = lastTimestamp,
-            unreadCount = unreadCount,
-            userId = userId,
-            participants = participants,
-            lastRead = lastRead,
-            fcmTokens = Converters().jsonToStringMap(fcmTokens)
-
+    // Helper function to convert to Firestore map
+    fun toFirestoreMap(): Map<String, Any> {
+        val map = mutableMapOf<String, Any>(
+            "name" to name,
+            "lastMessage" to (lastMessage ?: ""),
+            "lastTimestamp" to lastTimestamp,
+            "participants" to participants,
+            "isArchived" to isArchived,
+            "isMuted" to isMuted,
+            "fcmTokens" to fcmTokens,
+            "type" to type,
+            "createdBy" to createdBy,
+            "createdAt" to createdAt
         )
+
+        if (type == "group") {
+            map["admins"] = admins
+        }
+
+        // Add lastRead fields for all participants
+        participants.forEach { userId ->
+            map["lastRead_$userId"] = lastRead
+        }
+
+        return map
     }
 }

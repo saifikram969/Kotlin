@@ -61,6 +61,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.window.PopupProperties
+import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.cloudinary.android.MediaManager
 import com.cloudinary.android.callback.ErrorInfo
@@ -89,7 +90,8 @@ fun ChatScreen(
     currentUserId: String,
     roomId: String,
     otherUserId: String,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    navController: NavController
 ) {
 
     LaunchedEffect(Unit) {

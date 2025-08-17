@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.quickchat.R
 import com.example.quickchat.data.model.ChatRoom
+import com.example.quickchat.data.model.User
 import com.example.quickchat.presentation.component.CreateRoomBottomSheet
 import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
 import com.google.firebase.firestore.BuildConfig
@@ -79,6 +80,36 @@ fun ChatRoomListScreen(
     var showShareDialog by remember { mutableStateOf(false) }
     var selectedRoomId by remember { mutableStateOf("") }
 
+    var newGroupTitle by remember { mutableStateOf("") }
+    var selectedUsers by remember { mutableStateOf<List<User>>(emptyList()) }
+    var isCreatingGroup by remember { mutableStateOf(false) }
+    var availableUsers by remember { mutableStateOf<List<User>>(emptyList()) }
+
+    val isLoadingUsers by viewModel.isLoadingUsers.collectAsState()
+    LaunchedEffect(availableUsers) {
+        Log.d("UI_DEBUG", "UI received ${availableUsers.size} users")
+        availableUsers.forEach { user ->
+            Log.d("UI_DEBUG", "UI user: ${user.userName}")
+        }
+    }
+
+    LaunchedEffect(showCreateRoomSheet, isCreatingGroup) {
+        if (showCreateRoomSheet) {
+            Log.d("UI_DEBUG", "Loading users for sheet...")
+            viewModel.loadAvailableUsers(userId) // Use userId as roomId for now
+        }
+    }
+
+    // Handle creation based on type
+    val onCreateClick = {
+        if (isCreatingGroup) {
+            viewModel.createGroupChat(newGroupTitle, selectedUsers.map { it.deviceId })
+        } else {
+            if (selectedUsers.size == 1) {
+                viewModel.createChatRoom(selectedUsers.first().deviceId)
+            }
+        }
+    }
 
 
     // Handle undo action
@@ -171,12 +202,33 @@ fun ChatRoomListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showCreateRoomSheet = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Create new chat")
+            Column(horizontalAlignment = Alignment.End) {
+                // Group chat FAB
+                FloatingActionButton(
+                    onClick = {
+                        isCreatingGroup = true
+                        showCreateRoomSheet = true
+                    },
+                    modifier = Modifier.size(40.dp),
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Create group")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // DM FAB
+                FloatingActionButton(
+                    onClick = {
+                        isCreatingGroup = false
+                        showCreateRoomSheet = true
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Create chat")
+                }
             }
         }
     ) { innerPadding ->
@@ -187,10 +239,7 @@ fun ChatRoomListScreen(
         ) {
             when {
                 isLoading && rooms.isEmpty() -> FullScreenLoading()
-                error != null -> ErrorState(
-                    error = error,
-                    onRetry = { viewModel.fetchChatRooms() }
-                )
+                error != null -> ErrorState(error) { viewModel.fetchChatRooms() }
                 rooms.isEmpty() -> EmptyState { viewModel.fetchChatRooms() }
                 else -> ChatRoomListContent(
                     rooms = rooms,
@@ -209,29 +258,36 @@ fun ChatRoomListScreen(
                     isLoading = isLoading
                 )
             }
-/*
-            // Using the external CreateRoomBottomSheet component
-           *//* CreateRoomBottomSheet(
+
+            CreateRoomBottomSheet(
                 show = showCreateRoomSheet,
                 onDismiss = {
                     showCreateRoomSheet = false
-                    newChatUsername = ""
+                    newGroupTitle = ""
+                    selectedUsers = emptyList()
                     viewModel.resetRoomCreationState()
                 },
-                username = newChatUsername,
-                onUsernameChange = { newChatUsername = it },
-                onCreateClick = {
-                    if (newChatUsername.isNotBlank()) {
-                        viewModel.createChatRoom(newChatUsername)
+                roomTitle = newGroupTitle,
+                onRoomTitleChange = { newGroupTitle = it },
+                initialMembers = selectedUsers,
+                onMemberSelectionChange = { user, selected ->
+                    selectedUsers = if (selected) {
+                        selectedUsers + user
+                    } else {
+                        selectedUsers.filter { it.deviceId != user.deviceId }
                     }
                 },
-                isLoading = creationState is ChatRoomListViewModel.RoomCreationState.Loading
-            )*/
+                onCreateClick = onCreateClick,
+                isGroup = isCreatingGroup,
+                isLoading = creationState is ChatRoomListViewModel.RoomCreationState.Loading,
+                viewModel = viewModel
+            )
         }
     }
-
-
 }
+
+
+
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

@@ -3,6 +3,8 @@ package com.example.quickchat.data.repository
 import android.util.Log
 import com.example.quickchat.data.local.ChatRoomDao
 import com.example.quickchat.data.model.ChatRoom
+import com.example.quickchat.data.model.GroupMember
+import com.example.quickchat.data.model.User
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -10,23 +12,15 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
-import kotlin.time.Duration.Companion.days
 
 private const val TAG = "FirestoreChatRoomRepo"
 private const val CHATROOMS_COLLECTION = "chatrooms"
@@ -72,7 +66,7 @@ class FirestoreChatRoomRepository @Inject constructor(
     /**
      * Removes a user's FCM token from the chatroom
      */
-     suspend fun removeFcmTokenFromRoom(roomId: String, userId: String) {
+    suspend fun removeFcmTokenFromRoom(roomId: String, userId: String) {
         try {
             val updateMap = mapOf(
                 "fcmTokens.$userId" to FieldValue.delete(),
@@ -90,6 +84,7 @@ class FirestoreChatRoomRepository @Inject constructor(
             throw e
         }
     }
+
     /**
      * Gets all FCM tokens for participants in a room (except the current user)
      */
@@ -210,10 +205,6 @@ class FirestoreChatRoomRepository @Inject constructor(
     }
 
 
-
-
-
-
     override suspend fun createChatRoom(user1: String, user2: String): Result<String> {
         return try {
             val participants = listOf(user1, user2).sorted()
@@ -279,10 +270,12 @@ class FirestoreChatRoomRepository @Inject constructor(
         try {
             firestore.collection(CHATROOMS_COLLECTION)
                 .document(roomId)
-                .update(mapOf(
-                    "isArchived" to archive,
-                    "lastUpdated" to FieldValue.serverTimestamp()
-                ))
+                .update(
+                    mapOf(
+                        "isArchived" to archive,
+                        "lastUpdated" to FieldValue.serverTimestamp()
+                    )
+                )
                 .await()
 
             chatRoomDao.getRoomById(roomId)?.let { room ->
@@ -299,10 +292,12 @@ class FirestoreChatRoomRepository @Inject constructor(
             // Mark as deleted in Firestore
             firestore.collection(CHATROOMS_COLLECTION)
                 .document(roomId)
-                .update(mapOf(
-                    "isDeleted" to true,
-                    "lastUpdated" to FieldValue.serverTimestamp()
-                ))
+                .update(
+                    mapOf(
+                        "isDeleted" to true,
+                        "lastUpdated" to FieldValue.serverTimestamp()
+                    )
+                )
                 .await()
 
             // Delete from local DB
@@ -318,10 +313,12 @@ class FirestoreChatRoomRepository @Inject constructor(
         try {
             firestore.collection(CHATROOMS_COLLECTION)
                 .document(roomId)
-                .update(mapOf(
-                    "isDeleted" to false,
-                    "lastUpdated" to FieldValue.serverTimestamp()
-                ))
+                .update(
+                    mapOf(
+                        "isDeleted" to false,
+                        "lastUpdated" to FieldValue.serverTimestamp()
+                    )
+                )
                 .await()
 
             // No need to update local DB here as the Firestore listener will handle it
@@ -337,7 +334,8 @@ class FirestoreChatRoomRepository @Inject constructor(
             // 1. Update Firestore atomically
             firestore.runTransaction { transaction ->
                 val docRef = firestore.collection(CHATROOMS_COLLECTION).document(roomId)
-                val currentCount = (transaction.get(docRef).get("unreadCount_$userId") as? Long) ?: 0L
+                val currentCount =
+                    (transaction.get(docRef).get("unreadCount_$userId") as? Long) ?: 0L
                 transaction.update(docRef, "unreadCount_$userId", currentCount + 1)
                 transaction.update(docRef, "lastUpdated", FieldValue.serverTimestamp())
             }.await()
@@ -374,10 +372,14 @@ class FirestoreChatRoomRepository @Inject constructor(
             Log.d("UNREAD_DEBUG", " Updating local DB...")
             chatRoomDao.getRoomById(roomId)?.let { room ->
                 Log.d("UNREAD_DEBUG", " Resetting unread count to 0")
-                chatRoomDao.insertAll(listOf(room.copy(
-                    unreadCount = 0,
-                    lastRead = timestamp
-                )))
+                chatRoomDao.insertAll(
+                    listOf(
+                        room.copy(
+                            unreadCount = 0,
+                            lastRead = timestamp
+                        )
+                    )
+                )
                 Log.d("UNREAD_DEBUG", " Local DB updated successfully")
             } ?: run {
                 Log.e("UNREAD_DEBUG", " Room not found in local DB!")
@@ -386,11 +388,17 @@ class FirestoreChatRoomRepository @Inject constructor(
             Log.e("UNREAD_DEBUG", " Error in markMessagesAsRead: ${e.message}", e)
             throw e
         }
-    }    override fun getUnreadCountFlow(roomId: String, userId: String): Flow<Int> {
+    }
+
+    override fun getUnreadCountFlow(roomId: String, userId: String): Flow<Int> {
         return chatRoomDao.getUnreadCountFlow(roomId, userId)
     }
+
     // Add this to your FirestoreChatRoomRepository
-    fun listenForNewMessages(userId: String, onNewMessage: (roomId: String, message: String) -> Unit): ListenerRegistration {
+    fun listenForNewMessages(
+        userId: String,
+        onNewMessage: (roomId: String, message: String) -> Unit
+    ): ListenerRegistration {
         return firestore.collection(CHATROOMS_COLLECTION)
             .whereArrayContains("participants", userId)
             .addSnapshotListener { snapshot, error ->
@@ -413,6 +421,7 @@ class FirestoreChatRoomRepository @Inject constructor(
                 }
             }
     }
+
     override suspend fun toggleMuteStatus(roomId: String, mute: Boolean) {
         try {
             firestore.runTransaction { transaction ->
@@ -450,36 +459,42 @@ class FirestoreChatRoomRepository @Inject constructor(
     }
 
 
-// link with jpin user
+    // link with jpin user
 // Add these to FirestoreChatRoomRepository.kt
-override suspend fun generateInviteLink(roomId: String, creatorId: String): String {
-    // Verify creator is admin of the chatroom
-    val room = firestore.collection(CHATROOMS_COLLECTION)
-        .document(roomId)
-        .get()
-        .await()
+    override suspend fun generateInviteLink(roomId: String, creatorId: String): String {
+        // Verify creator is admin of the chatroom
+        val room = firestore.collection(CHATROOMS_COLLECTION)
+            .document(roomId)
+            .get()
+            .await()
 
-    val admins = room.get("admins") as? List<String> ?: emptyList()
-    if (!admins.contains(creatorId)) {
-        throw Exception("Only admins can generate invites")
+        val admins = room.get("admins") as? List<String> ?: emptyList()
+        if (!admins.contains(creatorId)) {
+            throw Exception("Only admins can generate invites")
+        }
+
+
+        val token = UUID.randomUUID().toString()
+        val expiresAt = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(7) // 1 week expiry
+        firestore.collection("chatroom_invites")
+            .document(roomId)
+            .set(
+                mapOf(
+                    "token" to token,
+                    "expiresAt" to expiresAt,
+                    "creatorId" to creatorId,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            )
+
+        return "https://yourapp.com/join/$roomId?token=$token"
     }
 
-
-    val token = UUID.randomUUID().toString()
-    val expiresAt = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(7) // 1 week expiry
-    firestore.collection("chatroom_invites")
-        .document(roomId)
-        .set(mapOf(
-            "token" to token,
-            "expiresAt" to expiresAt,
-            "creatorId" to creatorId,
-            "createdAt" to FieldValue.serverTimestamp()
-        ))
-
-    return "https://yourapp.com/join/$roomId?token=$token"
-}
-
-    override suspend fun joinChatroomViaLink(roomId: String, token: String, userId: String): Boolean {
+    override suspend fun joinChatroomViaLink(
+        roomId: String,
+        token: String,
+        userId: String
+    ): Boolean {
         return try {
             // Verify the invite
             val invite = firestore.collection("chatroom_invites")
@@ -488,7 +503,8 @@ override suspend fun generateInviteLink(roomId: String, creatorId: String): Stri
                 .await()
 
             if (invite.getString("token") != token ||
-                invite.getLong("expiresAt")!! < System.currentTimeMillis()) {
+                invite.getLong("expiresAt")!! < System.currentTimeMillis()
+            ) {
                 return false
             }
 
@@ -513,4 +529,298 @@ override suspend fun generateInviteLink(roomId: String, creatorId: String): Stri
     }
 
 
+    //room creation
+// In FirestoreChatRoomRepository.kt
+    override suspend fun createGroupChat(
+        title: String,
+        creatorId: String,
+        members: List<String>
+    ): Result<String> {
+        return try {
+            val roomId = "group_${UUID.randomUUID()}"
+            val allParticipants = members + creatorId
+            val timestamp = System.currentTimeMillis()
+
+            val roomData = mapOf<String, Any>(
+                "name" to title,
+                "lastMessage" to "",
+                "lastTimestamp" to timestamp,
+                "participants" to allParticipants,
+                "type" to "group",
+                "createdBy" to creatorId,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "admins" to listOf(creatorId),
+                "fcmTokens" to mapOf<String, String>()
+            )
+
+            // Set up member roles in subcollection
+            val batch = firestore.batch()
+            val roomRef = firestore.collection(CHATROOMS_COLLECTION).document(roomId)
+            batch.set(roomRef, roomData)
+
+            // Add members with their roles
+            allParticipants.forEach { userId ->
+                val memberData = mapOf(
+                    "role" to if (userId == creatorId) "admin" else "member",
+                    "joinedAt" to FieldValue.serverTimestamp(),
+                    "isMuted" to false
+                )
+                val memberRef = roomRef.collection("members").document(userId)
+                batch.set(memberRef, memberData)
+            }
+
+            batch.commit().await()
+
+            // Create local room object
+            val newRoom = ChatRoom(
+                roomId = roomId,
+                name = title,
+                lastMessage = "",
+                lastTimestamp = timestamp,
+                unreadCount = 0,
+                userId = creatorId,
+                participants = allParticipants,
+                lastRead = timestamp,
+                type = "group",
+                createdBy = creatorId,
+                createdAt = timestamp,
+                admins = listOf(creatorId),
+                fcmTokens = emptyMap(),
+                isLocal = false,
+                isArchived = false,
+                isDeleted = false,
+                isMuted = false,
+                isProcessingMute = false,
+                pendingMuteState = null
+            )
+
+            chatRoomDao.insertAll(listOf(newRoom))
+
+            Result.success(roomId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating group chat", e)
+            Result.failure(e)
+        }
+
+
+    }
+
+    override suspend fun getGroupMembers(roomId: String): List<GroupMember> {
+        return try {
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("members")
+                .get()
+                .await()
+                .documents
+                .mapNotNull { doc ->
+                    doc.toObject(GroupMember::class.java)?.copy(userId = doc.id)
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting group members", e)
+            emptyList()
+        }
+    }
+
+
+    // In FirestoreChatRoomRepository.kt
+    override suspend fun getAvailableUsersToAdd(roomId: String): List<User> {
+        return try {
+            val documents = firestore.collection("devices")
+                .get()
+                .await()
+                .documents
+
+            Log.d("REPO_DEBUG", "Total documents fetched: ${documents.size}")
+
+            documents.mapNotNull { doc ->
+                try {
+                    val userName = doc.getString("userName") ?: ""
+                    val deviceId = doc.id
+
+                    Log.d("REPO_DEBUG", "Processing doc: $deviceId")
+                    Log.d("REPO_DEBUG", "Raw userName field: '${doc.getString("userName")}'")
+                    Log.d("REPO_DEBUG", "All fields: ${doc.data}")
+
+                    if (userName.isBlank()) {
+                        Log.w("REPO_DEBUG", "Empty userName for device: $deviceId")
+                        return@mapNotNull null
+                    }
+
+                    User(
+                        deviceId = deviceId,
+                        userName = userName,
+                        fcmToken = doc.getString("fcmToken"),
+                        lastUpdated = doc.getDate("lastUpdated")
+                    ).also {
+                        Log.d("REPO_DEBUG", "Successfully mapped user: ${it.userName}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("REPO_ERROR", "Error mapping doc ${doc.id}: ${e.message}", e)
+                    null
+                }
+            }.also { users ->
+                Log.d("REPO_DEBUG", "Final users list size: ${users.size}")
+                users.forEach { user ->
+                    Log.d("REPO_DEBUG", "Final user: ${user.deviceId} -> '${user.userName}'")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("REPO_ERROR", "Error fetching users: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+
+    override suspend fun addMemberToGroup(roomId: String, userId: String) {
+        try {
+            // First get user details
+            val userDoc = firestore.collection("devices").document(userId).get().await()
+            val userName = userDoc.getString("userName") ?: ""
+
+            // Add to members list
+            firestore.collection("chatrooms").document(roomId)
+                .update(
+                    "members", FieldValue.arrayUnion(
+                        mapOf(
+                            "userId" to userId,
+                            "name" to userName,
+                            "role" to "member",
+                            "joinedAt" to System.currentTimeMillis()
+                        )
+                    )
+                )
+                .await()
+
+            // Also add to participants list for quick access
+            firestore.collection("chatrooms").document(roomId)
+                .update("participants", FieldValue.arrayUnion(userId))
+                .await()
+        } catch (e: Exception) {
+            throw e
+        }
+    }
+
+
+    override suspend fun removeMemberFromGroup(roomId: String, userId: String) {
+        try {
+            // Remove from participants list
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .update("participants", FieldValue.arrayRemove(userId))
+                .await()
+
+            // Remove from members subcollection
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("members")
+                .document(userId)
+                .delete()
+                .await()
+
+            Log.d(TAG, "Removed user $userId from room $roomId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error removing member from group", e)
+            throw e
+        }
+    }
+
+
+    override suspend fun changeMemberRole(roomId: String, userId: String, newRole: String) {
+        try {
+            // Get member details from the members subcollection
+            val memberDoc = firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("members")
+                .document(userId)
+                .get()
+                .await()
+
+            if (memberDoc.exists()) {
+                val name = memberDoc.getString("name") ?: ""
+                val joinedAt = memberDoc.getLong("joinedAt") ?: System.currentTimeMillis()
+
+                // Update the role directly in the subcollection
+                firestore.collection(CHATROOMS_COLLECTION)
+                    .document(roomId)
+                    .collection("members")
+                    .document(userId)
+                    .update("role", newRole)
+                    .await()
+
+                Log.d(TAG, "Changed role of user $userId to $newRole in room $roomId")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error changing member role", e)
+            throw e
+        }
+    }
+
+
+    override suspend fun leaveGroup(roomId: String, userId: String) {
+        try {
+            removeMemberFromGroup(roomId, userId)
+            val roomDoc = firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .get()
+                .await()
+            val participants = roomDoc.get("participants") as? List<String> ?: emptyList()
+            if (participants.size == 1 && participants[0] == userId) {
+                deleteRoom(roomId)
+            }
+        } catch (e: Exception) {
+            Log.e(com.example.quickchat.data.repository.TAG, "Error leaving group", e)
+            throw e
+        }
+
+
+    }
+
+
+    override suspend fun transferOwnership(
+        roomId: String,
+        currentAdminId: String,
+        newAdminId: String
+    ) {
+        try {
+            changeMemberRole(roomId, currentAdminId, "member")
+            changeMemberRole(roomId, newAdminId, "admin")
+
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .update(
+                    mapOf(
+                        "createdBy" to newAdminId,
+                        "admins" to FieldValue.arrayUnion(newAdminId),
+                        "lastUpdated" to FieldValue.serverTimestamp()
+                    )
+                )
+                .await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error transferring ownership", e)
+            throw e
+        }
+
+
+    }
+
+    companion object {
+        private const val TAG = "FirestoreChatRoomRepo"
+    }
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -20,6 +20,10 @@ data class ChatRoom(
     val isArchived: Boolean = false,
     val isDeleted: Boolean = false,
     val isMuted: Boolean = false,
+    val type: String = "dm", // "dm" or "group"
+    val createdBy: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val admins: List<String> = emptyList(),
     val isProcessingMute: Boolean = false,
     val pendingMuteState: Boolean? = null,
     val fcmTokens: Map<String, String> = emptyMap()

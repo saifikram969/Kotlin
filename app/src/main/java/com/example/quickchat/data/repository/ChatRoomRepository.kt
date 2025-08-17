@@ -1,6 +1,8 @@
 package com.example.quickchat.data.repository
 
 import com.example.quickchat.data.model.ChatRoom
+import com.example.quickchat.data.model.GroupMember
+import com.example.quickchat.data.model.User
 import kotlinx.coroutines.flow.Flow
 
 interface ChatRoomRepository {
@@ -22,8 +24,30 @@ interface ChatRoomRepository {
     suspend fun revokeInviteLink(roomId: String)
     suspend fun syncRoomsWithFirestore(userId: String)
 
+
+    // room creation
+    suspend fun createGroupChat(
+        title: String,
+        creatorId: String,
+        members: List<String>
+    ): Result<String>
+    suspend fun getGroupMembers(roomId: String): List<GroupMember>
+    suspend fun getAvailableUsersToAdd(roomId: String): List<User>
+    suspend fun addMemberToGroup(roomId: String, userId: String)
+    suspend fun removeMemberFromGroup(roomId: String, userId: String)
+    suspend fun changeMemberRole(roomId: String, userId: String, newRole: String)
+    suspend fun leaveGroup(roomId: String, userId: String)
+    suspend fun transferOwnership(roomId: String, currentAdminId: String, newAdminId: String)
+
+
+
+
 }// Create this in a new file or at the top of your repository
 sealed class RepositoryResult<out T> {
     data class Success<out T>(val value: T) : RepositoryResult<T>()
     data class Failure(val exception: Throwable) : RepositoryResult<Nothing>()
+
+
+
+
 }

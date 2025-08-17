@@ -11,7 +11,7 @@ import com.example.quickchat.data.model.ChatRoom
 
 @Database(
     entities = [ChatMessageEntity::class, ChatRoom::class, AppUserEntity::class],
-    version = 20, //
+    version = 21, //
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -425,7 +425,6 @@ abstract class AppDatabase : RoomDatabase() {
         }
         val MIGRATION_18_19 = object : Migration(18, 19) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                // Create the new app_user table
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS app_user (
                         deviceId TEXT NOT NULL PRIMARY KEY,
@@ -436,11 +435,73 @@ abstract class AppDatabase : RoomDatabase() {
                 """)
             }
         }
-    }
-    val MIGRATION_1_2 = object : Migration(19, 20) {
-        override fun migrate(database: SupportSQLiteDatabase) {
-            database.execSQL("ALTER TABLE app_user ADD COLUMN hasShownNameDialog INTEGER NOT NULL DEFAULT 0")
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE app_user ADD COLUMN hasShownNameDialog INTEGER NOT NULL DEFAULT 0")
+            }
         }
+
+
+
+
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Recreate tables with current schema
+                database.execSQL("""
+            CREATE TABLE new_chat_rooms (
+                roomId TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                lastMessage TEXT,
+                lastTimestamp INTEGER NOT NULL,
+                unreadCount INTEGER NOT NULL,
+                userId TEXT NOT NULL,
+                participants TEXT NOT NULL,
+                lastRead INTEGER NOT NULL,
+                lastUpdated INTEGER NOT NULL,
+                isLocal INTEGER NOT NULL,
+                isArchived INTEGER NOT NULL,
+                isDeleted INTEGER NOT NULL,
+                isMuted INTEGER NOT NULL,
+                isProcessingMute INTEGER NOT NULL,
+                pendingMuteState INTEGER,
+                fcmTokens TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT 'dm',
+                createdBy TEXT NOT NULL DEFAULT '',
+                createdAt INTEGER NOT NULL DEFAULT 0,
+                admins TEXT NOT NULL DEFAULT '[]'
+            )
+        """)
+
+                // Copy data from old table
+                database.execSQL("""
+            INSERT INTO new_chat_rooms (
+                roomId, name, lastMessage, lastTimestamp, unreadCount,
+                userId, participants, lastRead, lastUpdated,
+                isLocal, isArchived, isDeleted, isMuted, isProcessingMute,
+                pendingMuteState, fcmTokens
+            )
+            SELECT 
+                roomId, name, lastMessage, lastTimestamp, unreadCount,
+                userId, participants, lastRead, lastUpdated,
+                isLocal, isArchived, isDeleted, isMuted, isProcessingMute,
+                pendingMuteState, fcmTokens
+            FROM chat_rooms
+        """)
+
+                // Drop old table and rename new one
+                database.execSQL("DROP TABLE chat_rooms")
+                database.execSQL("ALTER TABLE new_chat_rooms RENAME TO chat_rooms")
+            }
+        }
+
+
+
+
+
+
+
     }
 }
 
