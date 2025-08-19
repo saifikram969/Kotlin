@@ -7,6 +7,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.example.quickchat.presentation.ChatRoomListScreen.ChatRoomListScreen
+import com.example.quickchat.presentation.component.GroupInfoScreen
 import com.example.quickchat.presentation.component.GroupMemberManagementScreen
 import com.example.quickchat.presentation.component.NameInputDialog
 import com.example.quickchat.presentation.screen.ChatScreen
@@ -18,6 +19,7 @@ object Routes {
     const val CHAT_ROOMS = "chat_rooms/{userId}"
     const val CHAT_SCREEN = "chat/{currentUserId}/{roomId}/{otherUserId}"
     const val GROUP_MANAGEMENT = "group_management/{roomId}/{currentUserId}"
+    const val GROUP_INFO = "group_info/{groupId}"
 
     fun nameDialogRoute(deviceId: String) = "name_dialog/$deviceId"
     fun chatRoomsRoute(userId: String) = "chat_rooms/$userId"
@@ -26,6 +28,8 @@ object Routes {
 
     fun groupManagementRoute(roomId: String, currentUserId: String) =
         "group_management/$roomId/$currentUserId"
+
+    fun groupInfoRoute(roomId: String) = "group_info/$roomId"
 }
 
 @Composable
@@ -89,81 +93,16 @@ fun ChatAppNavHost(
             )
         }
 
+        composable(Routes.GROUP_INFO) { backStackEntry ->
+            val groupId = backStackEntry.arguments?.getString("groupId") ?: ""
+            GroupInfoScreen(
+                groupId = groupId,
+                onBackClick = { navController.popBackStack() },
+                onGroupManagementClick = { roomId, currentUserId ->
+                    navController.navigate(Routes.groupManagementRoute(roomId, currentUserId))
+                }
+            )
+        }
 
     }
 }
-
-/*@Composable
-fun UserSelectionScreen(onUserSelected: (String) -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // Top Text
-        Text(
-            text = "Testing mode",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(bottom = 32.dp)
-        )
-
-        // User 1 Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onUserSelected("user1") },
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = "User 1",
-                    tint = Color.Gray,
-                    modifier = Modifier.size(48.dp)
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = "Login as User 1",
-                    style = MaterialTheme.typography.bodyLarge.copy(color = Color.Gray)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // User 2 Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onUserSelected("user2") },
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = "User 2",
-                    tint = Color.Gray,
-                    modifier = Modifier.size(48.dp)
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = "Login as User 2",
-                    style = MaterialTheme.typography.bodyLarge.copy(color = Color.Gray)
-                )
-            }
-        }
-    }*/
-//}

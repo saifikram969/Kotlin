@@ -8,7 +8,7 @@ import androidx.room.PrimaryKey
 data class ChatRoom(
     @PrimaryKey
     val roomId: String,
-    val name: String,
+    val name: String = "",
     val lastMessage: String? = null,
     val lastTimestamp: Long = 0L,
     var unreadCount: Int = 0,

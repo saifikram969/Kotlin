@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -68,6 +69,7 @@ import com.cloudinary.android.callback.ErrorInfo
 import com.cloudinary.android.callback.UploadCallback
 import com.example.quickchat.data.model.ChatMessage
 import com.example.quickchat.data.model.MessageStatus
+import com.example.quickchat.navigation.Routes
 import com.example.quickchat.presentation.component.ChatTopBar
 import com.example.quickchat.presentation.component.MessageBubble
 import com.example.quickchat.presentation.viewmodel.ChatUiState
@@ -114,6 +116,8 @@ fun ChatScreen(
 
     val networkStatus by viewModel.networkStatus.collectAsState()
 
+    val uiState by viewModel.uiState.collectAsState()
+
 
     // Handle lifecycle events for presence
     DisposableEffect(Unit) {
@@ -142,6 +146,18 @@ fun ChatScreen(
             viewModel.updateTypingStatus(roomId, currentUserId, false)
         }
     }
+    val roomName by remember(uiState) {
+        derivedStateOf {
+            when (uiState) {
+                is ChatUiState.Success -> (uiState as ChatUiState.Success).roomName
+                else -> "Chat Room" // Fallback
+            }
+        }
+    }
+
+
+
+
 
     // Typing status tracking
     var isTyping by remember { mutableStateOf(false) }
@@ -382,7 +398,6 @@ fun ChatScreen(
         }
     }
 
-    val uiState by viewModel.uiState.collectAsState()
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     LaunchedEffect(uiState) {
@@ -476,8 +491,9 @@ fun ChatScreen(
                 )
             }
         }
+
         ChatTopBar(
-            chatRoomName = "Chat Room",
+            chatRoomName = roomName?: "Loading...",
             participantName = otherUserId,
             isOnline = presenceStatus ?: false,
             isTyping = otherUserTyping,
@@ -504,6 +520,33 @@ fun ChatScreen(
                     Column(
                         modifier = Modifier.padding(vertical = 8.dp)
                     ) {
+                        // Group Info option
+                        TextButton(
+                            onClick = {
+                                showOptionsMenu = false
+                                navController.navigate(Routes.groupInfoRoute(roomId))
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Info,
+                                    contentDescription = "Group Info",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = "Group Info",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+
+                        Divider(modifier = Modifier.padding(vertical = 4.dp))
+
                         // Export options section
                         Text(
                             text = "Export chat",

@@ -10,6 +10,7 @@ import com.example.quickchat.data.repository.PresenceRepositoryImpl
 import com.example.quickchat.data.repository.UserRepository
 import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
+import com.example.quickchat.presentation.viewmodel.GroupInfoViewModel
 import com.example.quickchat.utils.ConnectivityObserver
 import com.example.quickchat.utils.NetworkConnectivityObserver
 import com.google.firebase.firestore.FirebaseFirestore
@@ -76,8 +77,10 @@ val appModule = module {
     viewModel { ChatViewModel(get(), get(),get(),get(),get(),get()) }
 
     // Add ChatRoomListViewModel
-    viewModel { (userId: String) -> ChatRoomListViewModel(repository = get(), chatRepository = get(), userId = userId) }
+    viewModel { (userId: String) -> ChatRoomListViewModel(repository = get(), chatRepository = get(), get(), userId = userId) }
 
+    //groupinfo viewmodel
+    viewModel { GroupInfoViewModel() }
 
 
 

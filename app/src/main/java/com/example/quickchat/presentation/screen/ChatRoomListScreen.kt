@@ -434,38 +434,20 @@ fun ChatRoomListItem(
     onMuteToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-
-
-
-
-    val otherUserId = room.participants.firstOrNull { it != currentUserId } ?: ""
-    val dateFormat = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
-    val timeString by remember(room.lastTimestamp) {
-        derivedStateOf { dateFormat.format(Date(room.lastTimestamp)) }
-    }
-
-    // Track button state to prevent double clicks
-    var isButtonEnabled by remember { mutableStateOf(true) }
-
-    // Move LaunchedEffect outside of onClick handler
-    val handleMuteToggle by remember {
-        derivedStateOf {
-            {
-                if (isButtonEnabled) {
-                    isButtonEnabled = false
-                    onMuteToggle()
-
-                }
+    // Determine display name based on room type
+    val displayName = remember(room) {
+        when (room.type) {
+            "group" -> room.name // Use the group name/title for group chats
+            else -> { // For direct messages, show the other participant's name
+                val otherUserId = room.participants.firstOrNull { it != currentUserId } ?: ""
+                "Chat with $otherUserId"
             }
         }
     }
 
-    // Handle the mute toggle completion
-    LaunchedEffect(Unit) {
-        if (!isButtonEnabled) {
-            delay(1000)
-            isButtonEnabled = true
-        }
+    val dateFormat = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
+    val timeString by remember(room.lastTimestamp) {
+        derivedStateOf { dateFormat.format(Date(room.lastTimestamp)) }
     }
 
     Card(
@@ -481,7 +463,7 @@ fun ChatRoomListItem(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Mute button with proper state management
+            // Mute button
             IconButton(
                 onClick = {
                     if (!room.isProcessingMute) {
@@ -509,17 +491,28 @@ fun ChatRoomListItem(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Avatar
+            // Avatar - show different icon for groups
             Surface(
                 modifier = Modifier.size(48.dp),
                 shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.primaryContainer
+                color = if (room.type == "group") MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.primaryContainer
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = otherUserId.take(1).uppercase(),
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    if (room.type == "group") {
+                        // Show first letter of group name for groups
+                        Text(
+                            text = room.name.take(1).uppercase(),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    } else {
+                        // Show first letter of other user's ID for DMs
+                        val otherUserId = room.participants.firstOrNull { it != currentUserId } ?: ""
+                        Text(
+                            text = otherUserId.take(1).uppercase(),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
                 }
             }
 
@@ -528,7 +521,7 @@ fun ChatRoomListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Chat with $otherUserId",
+                        text = displayName,
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -550,7 +543,6 @@ fun ChatRoomListItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            val unreadCount by rememberUpdatedState(room.unreadCount)
 
             Column(horizontalAlignment = Alignment.End) {
                 Text(

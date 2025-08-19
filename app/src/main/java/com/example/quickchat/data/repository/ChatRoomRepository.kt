@@ -7,11 +7,16 @@ import kotlinx.coroutines.flow.Flow
 
 interface ChatRoomRepository {
     fun getChatRooms(userId: String): Flow<List<ChatRoom>>
-
     suspend fun updateLastReadTimestamp(roomId: String, userId: String, timestamp: Long)
     suspend fun archiveRoom(roomId: String, archive: Boolean) // Add this
     suspend fun toggleMuteStatus(roomId: String, mute: Boolean)
+
     suspend fun createChatRoom(user1: String, user2: String): Result<String> // Add this
+    suspend fun createGroupChat(title: String, creatorId: String, members: List<String>): Result<String>
+    suspend fun getRoomDetails(roomId: String, currentUserId: String): ChatRoom?
+
+
+
     suspend fun doesRoomExist(roomId: String): Boolean // Add this for verification
     suspend fun deleteRoom(roomId: String)
     suspend fun restoreRoom(roomId: String)
@@ -24,13 +29,6 @@ interface ChatRoomRepository {
     suspend fun revokeInviteLink(roomId: String)
     suspend fun syncRoomsWithFirestore(userId: String)
 
-
-    // room creation
-    suspend fun createGroupChat(
-        title: String,
-        creatorId: String,
-        members: List<String>
-    ): Result<String>
     suspend fun getGroupMembers(roomId: String): List<GroupMember>
     suspend fun getAvailableUsersToAdd(roomId: String): List<User>
     suspend fun addMemberToGroup(roomId: String, userId: String)

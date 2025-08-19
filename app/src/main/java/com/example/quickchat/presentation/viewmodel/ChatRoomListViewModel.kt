@@ -7,6 +7,7 @@ import com.example.quickchat.data.model.GroupMember
 import com.example.quickchat.data.model.User
 import com.example.quickchat.data.repository.ChatRepository
 import com.example.quickchat.data.repository.ChatRoomRepository
+import com.example.quickchat.data.repository.PresenceRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,8 +24,19 @@ import javax.inject.Inject
 class ChatRoomListViewModel @Inject constructor(
     private val repository: ChatRoomRepository,
     private val chatRepository: ChatRepository,
+    private val presenceRepository: PresenceRepository,
     private val userId: String
-) : ViewModel() {
+) : ViewModel(), GroupMemberHandler {
+    private val currentUserId = userId
+    // In ChatRoomListViewModel.kt
+    private val _groupMembers = MutableStateFlow<List<GroupMember>>(emptyList())
+    override val groupMembers: StateFlow<List<GroupMember>> = _groupMembers.asStateFlow()
+
+    private val _isLoadingMembers = MutableStateFlow(false)
+    val isLoadingMembers: StateFlow<Boolean> = _isLoadingMembers.asStateFlow()
+
+    private val _presenceStatus = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    override val presenceStatus: StateFlow<Map<String, Boolean>> = _presenceStatus.asStateFlow()
 
     private val _chatRooms = MutableStateFlow<List<ChatRoom>>(emptyList())
     val chatRooms: StateFlow<List<ChatRoom>> = _chatRooms
@@ -40,7 +52,7 @@ class ChatRoomListViewModel @Inject constructor(
 
     // Loading State
     private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading
+    override val isLoading: StateFlow<Boolean> = _isLoading
 
     // Error State
     private val _error = MutableStateFlow<String?>(null)
@@ -56,6 +68,8 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
     private val _isLoadingUsers = MutableStateFlow(false)
     val availableUsers: StateFlow<List<User>> = _availableUsers.asStateFlow()
     val isLoadingUsers: StateFlow<Boolean> = _isLoadingUsers.asStateFlow()
+
+
 
     // In ChatRoomListViewModel.kt
     fun loadAvailableUsers(roomId: String) {
@@ -134,6 +148,65 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
                 _isLoading.value = false
             }
         }
+    }
+
+
+/*    // In ChatRoomListViewModel.kt
+    fun getMemberWithPresence(userId: String): GroupMember? {
+        return _groupMembers.value.find { it.userId == userId }?.let { member ->
+            member.copy(isOnline = _presenceStatus.value[userId] ?: false)
+        }
+    }
+
+    fun getCurrentMembersWithPresence(): List<GroupMember> {
+        return _groupMembers.value.map { member ->
+            member.copy(isOnline = _presenceStatus.value[member.userId] ?: false)
+        }
+    }*/
+// Implement interface methods (same as GroupInfoViewModel)
+override fun loadGroupMembers(roomId: String) {
+    viewModelScope.launch {
+        _isLoading.value = true
+        try {
+            _groupMembers.value = repository.getGroupMembers(roomId)
+            _groupMembers.value.forEach { member ->
+                observePresence(member.userId)
+            }
+        } catch (e: Exception) {
+            // Handle error
+        } finally {
+            _isLoading.value = false
+        }
+    }
+}
+
+    override fun getMemberWithPresence(userId: String): GroupMember? {
+        return _groupMembers.value.find { it.userId == userId }?.let { member ->
+            member.copy(isOnline = _presenceStatus.value[userId] ?: false)
+        }
+    }
+
+    override fun getCurrentMembersWithPresence(): List<GroupMember> {
+        return _groupMembers.value.map { member ->
+            member.copy(isOnline = _presenceStatus.value[member.userId] ?: false)
+        }
+    }
+
+    // Private helper (same as GroupInfoViewModel)
+    override fun observePresence(userId: String) {
+        viewModelScope.launch {
+            presenceRepository.observeUserPresence(userId).collect { isOnline ->
+                _presenceStatus.update { current ->
+                    current + (userId to isOnline)
+                }
+            }
+        }
+    }
+
+
+    override fun onCleared() {
+        // Clean up any presence observers if needed
+        super.onCleared()
     }
 
 
@@ -232,29 +305,6 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
         _showUndo.value = null
     }
 
-    // Remove the override keyword since this isn't implementing any interface
-    fun createChatRoom(otherUserId: String) {
-        viewModelScope.launch {
-            _roomCreationState.value = RoomCreationState.Loading
-            try {
-                // Use the repository to handle the actual creation
-                val result = repository.createChatRoom(userId, otherUserId)
-
-                if (result.isSuccess) {
-                    _roomCreationState.value = RoomCreationState.Success(result.getOrThrow())
-                    fetchChatRooms() // Refresh the list
-                } else {
-                    _roomCreationState.value = RoomCreationState.Error(
-                        result.exceptionOrNull()?.message ?: "Failed to create room"
-                    )
-                }
-            } catch (e: Exception) {
-                _roomCreationState.value = RoomCreationState.Error(
-                    e.message ?: "Failed to create room"
-                )
-            }
-        }
-    }
 
     fun resetRoomCreationState() {
         _roomCreationState.value = RoomCreationState.Idle
@@ -387,25 +437,79 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
     //creation room
     // In ChatRoomListViewModel.kt
     fun createGroupChat(title: String, members: List<String>) {
+        if (userId.isEmpty()) {
+            _roomCreationState.value = RoomCreationState.Error("User not authenticated")
+            return
+        }
+
         viewModelScope.launch {
             _roomCreationState.value = RoomCreationState.Loading
             try {
-                val result = repository.createGroupChat(title, userId, members)
-                if (result.isSuccess) {
-                    _roomCreationState.value = RoomCreationState.Success(result.getOrThrow())
-                    fetchChatRooms()
-                } else {
-                    _roomCreationState.value = RoomCreationState.Error(
-                        result.exceptionOrNull()?.message ?: "Failed to create group"
-                    )
-                }
+                val result = repository.createGroupChat(
+                    title = title.trim(),
+                    creatorId = userId,
+                    members = members.filter { it.isNotEmpty() && it != userId }
+                )
+
+                result.fold(
+                    onSuccess = { roomId ->
+                        _roomCreationState.value = RoomCreationState.Success(roomId)
+                        fetchChatRooms(true) // Force refresh
+                    },
+                    onFailure = { e ->
+                        _roomCreationState.value = RoomCreationState.Error(
+                            e.message ?: "Failed to create group"
+                        )
+                    }
+                )
             } catch (e: Exception) {
                 _roomCreationState.value = RoomCreationState.Error(
-                    e.message ?: "Failed to create group"
+                    "Failed to create group: ${e.message}"
                 )
             }
         }
     }
+
+    fun createChatRoom(otherUserId: String) {
+        if (userId.isEmpty()) {
+            _roomCreationState.value = RoomCreationState.Error("User not authenticated")
+            return
+        }
+
+        viewModelScope.launch {
+            _roomCreationState.value = RoomCreationState.Loading
+            try {
+                if (otherUserId.isBlank()) {
+                    _roomCreationState.value = RoomCreationState.Error("Invalid user selected")
+                    return@launch
+                }
+
+                if (otherUserId == userId) {
+                    _roomCreationState.value = RoomCreationState.Error("Cannot chat with yourself")
+                    return@launch
+                }
+
+                val result = repository.createChatRoom(userId, otherUserId)
+
+                result.fold(
+                    onSuccess = { roomId ->
+                        _roomCreationState.value = RoomCreationState.Success(roomId)
+                        fetchChatRooms(true)
+                    },
+                    onFailure = { e ->
+                        _roomCreationState.value = RoomCreationState.Error(
+                            e.message ?: "Failed to create chat"
+                        )
+                    }
+                )
+            } catch (e: Exception) {
+                _roomCreationState.value = RoomCreationState.Error(
+                    "Failed to create chat: ${e.message}"
+                )
+            }
+        }
+    }
+
 
 
     // In ChatRoomListViewModel.kt
@@ -437,6 +541,7 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
         viewModelScope.launch {
             try {
                 repository.addMemberToGroup(roomId, userId)
+                loadGroupMembers(roomId)
                 // Refresh members list
             } catch (e: Exception) {
                 _error.value = "Failed to add member: ${e.message}"
@@ -448,6 +553,7 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
         viewModelScope.launch {
             try {
                 repository.removeMemberFromGroup(roomId, userId)
+                loadGroupMembers(roomId)
                 // Refresh members list
             } catch (e: Exception) {
                 _error.value = "Failed to remove member: ${e.message}"
@@ -459,6 +565,7 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
         viewModelScope.launch {
             try {
                 repository.changeMemberRole(roomId, userId, newRole)
+                loadGroupMembers(roomId)
                 // Refresh members list
             } catch (e: Exception) {
                 _error.value = "Failed to change role: ${e.message}"
@@ -469,20 +576,17 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
     fun leaveGroup(roomId: String) {
         viewModelScope.launch {
             try {
-                repository.leaveGroup(roomId, userId)
-                // Navigate back
+                repository.leaveGroup(roomId, currentUserId)
             } catch (e: Exception) {
                 _error.value = "Failed to leave group: ${e.message}"
             }
         }
     }
 
-    fun transferOwnershipAndLeave(roomId: String, newAdminId: String) {
+    fun transferOwnership(roomId: String, newAdminId: String) {
         viewModelScope.launch {
             try {
-                repository.transferOwnership(roomId, userId, newAdminId)
-                repository.leaveGroup(roomId, userId)
-                // Navigate back
+                repository.transferOwnership(roomId, currentUserId, newAdminId)
             } catch (e: Exception) {
                 _error.value = "Failed to transfer ownership: ${e.message}"
             }

@@ -6,7 +6,7 @@ import java.util.Date
 
 data class User(
     val deviceId: String = "",
-    val userName: String = "", // Must match Firestore field name exactly
+    val userName: String = "",
     val fcmToken: String? = null,
     val lastUpdated: Date? = null
 ) {

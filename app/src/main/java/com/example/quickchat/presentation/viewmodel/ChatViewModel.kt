@@ -1,6 +1,7 @@
 package com.example.quickchat.presentation.viewmodel
 
  import android.app.Application
+ import android.content.ContentValues.TAG
  import android.util.Log
  import android.widget.Toast
  import androidx.compose.runtime.mutableStateListOf
@@ -19,7 +20,8 @@ import com.example.quickchat.data.repository.UserRepository
 import com.example.quickchat.utils.ConnectivityObserver
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.firestore
+ import com.google.firebase.firestore.ListenerRegistration
+ import com.google.firebase.firestore.firestore
  import io.grpc.Context
  import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -69,8 +71,10 @@ class ChatViewModel(
     private var currentRoomId: String? = null
     private var currentUserId: String? = null
     private var otherUserId: String? = null
+    private var typingStatusListener: ListenerRegistration? = null
 
-     private val _isTyping = MutableStateFlow(false)
+
+    private val _isTyping = MutableStateFlow(false)
     private val _otherUserTyping = MutableStateFlow<Boolean>(false)
     val otherUserTyping: StateFlow<Boolean> = _otherUserTyping
 
@@ -83,6 +87,9 @@ class ChatViewModel(
 
     private val  _currentUser = MutableStateFlow<AppUserEntity?>(null)
     val currentUser: StateFlow<AppUserEntity?> = _currentUser
+
+    private val _roomName = MutableStateFlow<String?>(null)
+    val roomName: StateFlow<String?> = _roomName
 
     init {
         viewModelScope.launch {
@@ -255,7 +262,17 @@ class ChatViewModel(
     suspend fun storeFcmToken(deviceId: String, token: String) {
         repository.storeFcmToken(deviceId, token)
     }
+    fun setCurrentUsers(roomId: String, currentUserId: String, otherUserId: String) {
+        this.currentRoomId = roomId
+        this.currentUserId = currentUserId
+        this.otherUserId = otherUserId
 
+        // Initialize all components that depend on these IDs
+        initializeChat(roomId, currentUserId)
+        observeTypingStatus(roomId, otherUserId)
+        observePresence(otherUserId)
+        updatePresence(currentUserId, true)
+    }
     override fun onCleared() {
         currentUserId?.let { userId ->
             updatePresence(userId, false)
@@ -263,8 +280,10 @@ class ChatViewModel(
                 updateTypingStatus(roomId, userId, false)
             }
         }
+        typingStatusListener?.remove()
         super.onCleared()
     }
+
 
     fun observePresence(userId: String) {
         viewModelScope.launch {
@@ -368,6 +387,12 @@ class ChatViewModel(
         viewModelScope.launch {
             _uiState.value = ChatUiState.Loading
 
+
+            // Fetch room details first to get the name immediately
+            val roomDetails = chatRoomRepository.getRoomDetails(roomId, currentUserId)
+            val roomName = roomDetails?.name ?: "Chat Room"
+            _roomName.value = roomName // Set the room name immediately
+
             // Always show cached messages first
             val cachedMessages = repository.getCachedMessages(roomId)
             if (cachedMessages.isNotEmpty()) {
@@ -375,6 +400,7 @@ class ChatViewModel(
                     messages = cachedMessages,
                     currentUserId = currentUserId,
                     roomId = roomId,
+                    roomName = roomName,
                     isOffline = !networkStatus.value
                 )
             }
@@ -388,7 +414,8 @@ class ChatViewModel(
                         ChatUiState.Success(
                             messages = updatedMessages,
                             currentUserId = currentUserId,
-                            roomId = roomId
+                            roomId = roomId,
+                            roomName = roomName
                         )
                     } else {
                         ChatUiState.Error("No messages found")
@@ -400,6 +427,7 @@ class ChatViewModel(
                             messages = cachedMessages,
                             currentUserId = currentUserId,
                             roomId = roomId,
+                            roomName,
                             isOffline = true
                         )
                     } else {
@@ -420,7 +448,8 @@ class ChatViewModel(
                     _uiState.value = ChatUiState.Success(
                         messages = messages.sortedBy { it.timestamp },
                         currentUserId = currentUserId,
-                        roomId = roomId
+                        roomId = roomId,
+                        roomName = roomName
                     )
                 }
             }
@@ -524,25 +553,40 @@ class ChatViewModel(
     }
 
     fun observeTypingStatus(roomId: String, userId: String) {
-        Firebase.firestore.collection(CHATROOMS_COLLECTION)
+        // Clear previous listener if exists
+        typingStatusListener?.remove()
+
+        if (roomId.isEmpty() || userId.isEmpty()) {
+            _otherUserTyping.value = false
+            return
+        }
+
+        typingStatusListener = Firebase.firestore.collection(CHATROOMS_COLLECTION)
             .document(roomId)
             .collection("typingStatus")
             .document(userId)
-            .addSnapshotListener { snapshot, _ ->
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error observing typing status", error)
+                    _otherUserTyping.value = false
+                    return@addSnapshotListener
+                }
+
                 val isTyping = snapshot?.getBoolean("isTyping") ?: false
                 _otherUserTyping.value = isTyping
 
-                // Update UI state with typing information
                 _uiState.update { currentState ->
                     if (currentState is ChatUiState.Success) {
-                        currentState.copy(typingUserId = if (isTyping) userId else null)
+                        currentState.copy(
+                            typingUserId = if (isTyping) userId else null,
+                            isOtherUserTyping = isTyping
+                        )
                     } else {
                         currentState
                     }
                 }
             }
     }
-
     fun retryMessage(roomId: String, message: ChatMessage) {
         val newClientId = "${message.senderId}_${System.currentTimeMillis()}"
         val retriedMessage = message.copy(
@@ -804,8 +848,10 @@ sealed class ChatUiState {
         val messages: List<ChatMessage>,
         val currentUserId: String,
         val roomId: String,
+        val roomName: String,
         val typingUserId: String? = null,
         val isOffline: Boolean = false,
+        val isOtherUserTyping: Boolean = false,
         val pendingMessages: List<ChatMessage> = emptyList()
     ) : ChatUiState()
 
