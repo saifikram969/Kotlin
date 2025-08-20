@@ -8,7 +8,6 @@ import com.example.quickchat.data.model.ChatRoom
 import kotlinx.coroutines.flow.Flow
 @Dao
 interface ChatRoomDao {
-    // Fixed: Changed 'timestamp' to 'lastTimestamp'
     @Query("SELECT * FROM chat_rooms WHERE userId = :userId ORDER BY lastTimestamp DESC")
     fun getChatRooms(userId: String): Flow<List<ChatRoom>>
 

@@ -524,7 +524,7 @@ fun ChatScreen(
                         TextButton(
                             onClick = {
                                 showOptionsMenu = false
-                                navController.navigate(Routes.groupInfoRoute(roomId))
+                                navController.navigate(Routes.groupInfoRoute(roomId, roomName))
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {

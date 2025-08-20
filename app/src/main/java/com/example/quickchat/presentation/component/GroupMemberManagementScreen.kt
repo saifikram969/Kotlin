@@ -165,7 +165,7 @@ fun GroupMemberManagementScreen(
     }
 
     if (showAddMemberDialog) {
-        MemberSelectionDialog(
+        AddMembersDialog(
             isLoading = isLoading,
             availableUsers = availableUsers,
             onUserSelected = { user ->
@@ -361,14 +361,108 @@ fun GroupMemberItem(
 fun MemberSelectionDialog(
     isLoading: Boolean = false,
     availableUsers: List<User>,
-    selectedUsers: List<User> = emptyList(),
+    initialSelectedUsers: List<User> = emptyList(), // Rename parameter to avoid conflict
     onUserSelected: (User) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var selectedUsers by remember { mutableStateOf<Set<String>>(emptySet()) }
+
     LaunchedEffect(availableUsers) {
         Log.d("MemberDialog", "Available users count: ${availableUsers.size}")
         availableUsers.forEach { user ->
             Log.d("MemberDialog", "User: ${user.deviceId} - ${user.userName}")
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select Members") }, // Changed title to differentiate
+        text = {
+            Column {
+                if (isLoading) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Loading users...")
+                    }
+                } else if (availableUsers.isEmpty()) {
+                    Text("No users available")
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                        items(availableUsers) { user ->
+                            UserSelectionItem(
+                                user = user,
+                                isSelected = selectedUsers.contains(user.deviceId),
+                                onSelected = {
+                                    selectedUsers = if (selectedUsers.contains(user.deviceId)) {
+                                        selectedUsers - user.deviceId
+                                    } else {
+                                        selectedUsers + user.deviceId
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    // Show selected count
+                    if (selectedUsers.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "${selectedUsers.size} user(s) selected",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                ) {
+                    Text("Cancel")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        // Add all selected users
+                        availableUsers.filter { selectedUsers.contains(it.deviceId) }
+                            .forEach { user ->
+                                onUserSelected(user)
+                            }
+                        onDismiss()
+                    },
+                    enabled = selectedUsers.isNotEmpty()
+                ) {
+                    Text("Select")
+                }
+            }
+        }
+    )
+}
+
+
+@Composable
+fun AddMembersDialog(
+    isLoading: Boolean = false,
+    availableUsers: List<User>,
+    onUserSelected: (User) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selectedUsers by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    LaunchedEffect(availableUsers) {
+        Log.d("AddMembersDialog", "Available users count: ${availableUsers.size}")
+        availableUsers.forEach { user ->
+            Log.d("AddMembersDialog", "User: ${user.deviceId} - ${user.userName}")
         }
     }
 
@@ -393,21 +487,66 @@ fun MemberSelectionDialog(
                         items(availableUsers) { user ->
                             UserSelectionItem(
                                 user = user,
-                                isSelected = selectedUsers.contains(user),
-                                onSelected = { onUserSelected(user) }
+                                isSelected = selectedUsers.contains(user.deviceId),
+                                onSelected = {
+                                    Log.d("AddMembersDialog", "User ${user.userName} selected: ${!selectedUsers.contains(user.deviceId)}")
+                                    selectedUsers = if (selectedUsers.contains(user.deviceId)) {
+                                        selectedUsers - user.deviceId
+                                    } else {
+                                        selectedUsers + user.deviceId
+                                    }
+                                    Log.d("AddMembersDialog", "Selected users: $selectedUsers")
+                                }
                             )
                         }
+                    }
+
+                    // Show selected count
+                    if (selectedUsers.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "${selectedUsers.size} user(s) selected",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }
         },
         confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Done")
+            Row {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                ) {
+                    Text("Cancel")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        Log.d("AddMembersDialog", "Add Selected clicked. Selected users: $selectedUsers")
+                        // Add all selected users
+                        availableUsers.filter { selectedUsers.contains(it.deviceId) }
+                            .forEach { user ->
+                                Log.d("AddMembersDialog", "Adding user: ${user.userName} (${user.deviceId})")
+                                onUserSelected(user)
+                            }
+                        onDismiss()
+                    },
+                    enabled = selectedUsers.isNotEmpty()
+                ) {
+                    Text("Add Selected")
+                }
             }
         }
     )
 }
+
+
+
 @Composable
 private fun UserSelectionItem(
     user: User,
@@ -457,50 +596,4 @@ private fun UserSelectionItem(
 
 
 
-@Preview(showBackground = true)
-@Composable
-fun PreviewGroupMemberItem() {
-    GroupMemberItem(
-        member = GroupMember(
-            userId = "1",
-            userName = "Alice",
-            role = "admin",
-            isOnline = true,
-            isMuted = true
-        ),
-        isAdmin = true,
-        currentUserId = "1",
-        isOnline = true,
-        onRemove = {},
-        onMakeAdmin = {},
-        onRemoveAdmin = {}
-    )
-}
 
-@Preview(showBackground = true)
-@Composable
-fun PreviewUserSelectionItem() {
-    UserSelectionItem(
-        user = User(
-            deviceId = "device123",
-            userName = "Bob"
-        ),
-        isSelected = false,
-        onSelected = {}
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewMemberSelectionDialog() {
-    MemberSelectionDialog(
-        isLoading = false,
-        availableUsers = listOf(
-            User(deviceId = "device1", userName = "Charlie"),
-            User(deviceId = "device2", userName = "Diana")
-        ),
-        selectedUsers = emptyList(),
-        onUserSelected = {},
-        onDismiss = {}
-    )
-}

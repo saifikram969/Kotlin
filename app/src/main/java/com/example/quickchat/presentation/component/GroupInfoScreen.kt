@@ -1,8 +1,4 @@
 package com.example.quickchat.presentation.component
-
-
-import android.util.Log
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,9 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
 import com.example.quickchat.data.model.GroupMember
-import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
 import com.example.quickchat.presentation.viewmodel.GroupInfoViewModel
 import org.koin.androidx.compose.koinViewModel
 
@@ -35,6 +29,7 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun GroupInfoScreen(
     groupId: String,
+    groupName: String,
     onBackClick: () -> Unit,
     onGroupManagementClick: (String, String) -> Unit,
     viewModel: GroupInfoViewModel = koinViewModel()
@@ -44,13 +39,12 @@ fun GroupInfoScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val context = LocalContext.current
 
-    // State for showing add member dialog
     var showAddMemberDialog by remember { mutableStateOf(false) }
     val availableUsers by viewModel.availableUsers.collectAsState()
     val isLoadingUsers by viewModel.isLoadingUsers.collectAsState()
 
     // In GroupInfoScreen.kt
-    LaunchedEffect(groupId, members) { // Add members as dependency
+    LaunchedEffect(groupId, members) {
         if (groupId.isNotBlank()) {
             if (members.isEmpty()) {
                 viewModel.loadGroupMembers(groupId)
@@ -95,7 +89,7 @@ fun GroupInfoScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "GP",
+                            text = groupName.take(2).uppercase(),
                             style = MaterialTheme.typography.headlineLarge
                         )
                     }
@@ -103,7 +97,7 @@ fun GroupInfoScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Group Chat",
+                        text = groupName,
                         style = MaterialTheme.typography.titleLarge
                     )
 
@@ -118,8 +112,7 @@ fun GroupInfoScreen(
             }
 
             item {
-                // Check if current user is admin to show add members button
-                val isAdmin = members.any { it.role == "admin" } // You need to pass actual current user ID here
+                val isAdmin = members.any { it.role == "admin" }
 
                 if (isAdmin) {
                     Button(
@@ -167,8 +160,8 @@ fun GroupInfoScreen(
                         member = member.copy(
                             isOnline = presenceStatus[member.userId] ?: false
                         ),
-                        isAdmin = members.any { it.role == "admin" }, // Check if current user is admin
-                        currentUserId = "", // You need to pass the actual current user ID here
+                        isAdmin = members.any { it.role == "admin" },
+                        currentUserId = "",
                         isOnline = presenceStatus[member.userId] ?: false,
                         onRemove = {
                             // Implement remove functionality
@@ -193,10 +186,9 @@ fun GroupInfoScreen(
 
     // Add Member Dialog
     if (showAddMemberDialog) {
-        MemberSelectionDialog(
+        AddMembersDialog(
             isLoading = isLoadingUsers,
             availableUsers = availableUsers,
-            selectedUsers = emptyList(), // No pre-selected users for adding
             onUserSelected = { user ->
                 viewModel.addMember(groupId, user.deviceId)
                 showAddMemberDialog = false

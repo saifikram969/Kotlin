@@ -45,7 +45,6 @@ data class ChatRoom(
             map["admins"] = admins
         }
 
-        // Add lastRead fields for all participants
         participants.forEach { userId ->
             map["lastRead_$userId"] = lastRead
         }

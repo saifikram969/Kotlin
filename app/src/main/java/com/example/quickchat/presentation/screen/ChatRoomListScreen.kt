@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -27,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,7 +60,7 @@ fun ChatRoomListScreen(
 ) {
     // Add debug logging
     LaunchedEffect(Unit) {
-        viewModel.fetchChatRooms(true) // Force initial refresh
+        viewModel.fetchChatRooms(true)
     }
 
 
@@ -301,10 +304,16 @@ private fun ChatRoomListContent(
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 8.dp),
+            contentPadding = PaddingValues(vertical = 8.dp, horizontal = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(rooms, key = { it.roomId }) { room ->
+
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .fillMaxWidth()
+                ){
                 SwipeActionsItem(
                     onArchive = { viewModel.archiveRoom(room.roomId) },
                     onDelete = { viewModel.deleteRoom(room.roomId) },
@@ -319,7 +328,7 @@ private fun ChatRoomListContent(
                 )
             }
         }
-
+    }
         if (isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier
@@ -480,8 +489,8 @@ fun ChatRoomListItem(
                     )
                 } else {
                     Icon(
-                        imageVector = if (room.isMuted) Icons.Default.VolumeOff
-                        else Icons.Default.VolumeUp,
+                        imageVector = if (room.isMuted) Icons.Default.NotificationsOff
+                        else Icons.Default.Notifications,
                         contentDescription = if (room.isMuted) "Unmute" else "Mute",
                         tint = if (room.isMuted) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant

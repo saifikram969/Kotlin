@@ -176,7 +176,7 @@ fun CreateRoomBottomSheet(
         MemberSelectionDialog(
             isLoading = isLoadingUsers,
             availableUsers = availableUsers,
-            selectedUsers = initialMembers,
+            initialSelectedUsers = initialMembers,
             onUserSelected = { user ->
                 onMemberSelectionChange(user, !initialMembers.contains(user))
             },

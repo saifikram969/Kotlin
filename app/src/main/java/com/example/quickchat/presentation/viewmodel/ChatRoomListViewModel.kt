@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -69,9 +70,6 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
     val availableUsers: StateFlow<List<User>> = _availableUsers.asStateFlow()
     val isLoadingUsers: StateFlow<Boolean> = _isLoadingUsers.asStateFlow()
 
-
-
-    // In ChatRoomListViewModel.kt
     fun loadAvailableUsers(roomId: String) {
         viewModelScope.launch {
             _isLoadingUsers.value = true
@@ -113,7 +111,6 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
         fetchChatRooms()
     }
 
-    // Modify the fetchChatRooms function
     fun fetchChatRooms(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -163,14 +160,16 @@ private val _availableUsers = MutableStateFlow<List<User>>(emptyList())
             member.copy(isOnline = _presenceStatus.value[member.userId] ?: false)
         }
     }*/
-// Implement interface methods (same as GroupInfoViewModel)
+// In ChatRoomListViewModel.kt - UPDATE the loadGroupMembers function:
 override fun loadGroupMembers(roomId: String) {
     viewModelScope.launch {
         _isLoading.value = true
         try {
-            _groupMembers.value = repository.getGroupMembers(roomId)
-            _groupMembers.value.forEach { member ->
-                observePresence(member.userId)
+            repository.getGroupMembers(roomId).collect { members ->
+                _groupMembers.value = members
+                _groupMembers.value.forEach { member ->
+                    observePresence(member.userId)
+                }
             }
         } catch (e: Exception) {
             // Handle error
@@ -256,18 +255,14 @@ override fun loadGroupMembers(roomId: String) {
     fun deleteRoom(roomId: String) {
         viewModelScope.launch {
             try {
-                // Optimistically update UI
                 _chatRooms.value = _chatRooms.value.filter { it.roomId != roomId }
 
-                // Perform actual deletion
                 repository.deleteRoom(roomId)
 
-                // Show undo option
                 _showUndo.value = UndoAction(roomId, "deleted")
             } catch (e: Exception) {
-                // If error occurs, revert UI state
                 _error.value = "Failed to delete room: ${e.message}"
-                fetchChatRooms() // Refresh the list
+                fetchChatRooms()
             }
         }
     }
@@ -405,9 +400,8 @@ override fun loadGroupMembers(roomId: String) {
                 Log.e("ChatRoomListVM", "Error handling new message", e)
             }
         }
-    }    // link join with user
+    }
 
-    // Add these to ChatRoomListViewModel.kt
     private val _shareLinkState = MutableStateFlow<ShareLinkState>(ShareLinkState.Idle)
     val shareLinkState: StateFlow<ShareLinkState> = _shareLinkState
 
@@ -435,7 +429,6 @@ override fun loadGroupMembers(roomId: String) {
     }
 
     //creation room
-    // In ChatRoomListViewModel.kt
     fun createGroupChat(title: String, members: List<String>) {
         if (userId.isEmpty()) {
             _roomCreationState.value = RoomCreationState.Error("User not authenticated")
@@ -510,19 +503,13 @@ override fun loadGroupMembers(roomId: String) {
         }
     }
 
-
-
-    // In ChatRoomListViewModel.kt
-
-    // Member management functions
-    fun getGroupMembers(roomId: String): List<GroupMember> {
-        return runBlocking {
-            try {
-                repository.getGroupMembers(roomId)
-            } catch (e: Exception) {
-                _error.value = "Failed to get group members: ${e.message}"
-                emptyList()
-            }
+    suspend fun getGroupMembersSnapshot(roomId: String): List<GroupMember> {
+        return try {
+            repository.getGroupMembers(roomId).first()
+        } catch (e: Exception) {
+            Log.e("VM_ERROR", "Error getting group members snapshot", e)
+            _error.value = "Failed to get group members: ${e.message}"
+            emptyList()
         }
     }
 
@@ -540,10 +527,12 @@ override fun loadGroupMembers(roomId: String) {
     fun addMember(roomId: String, userId: String) {
         viewModelScope.launch {
             try {
+                Log.d("ADD_MEMBER", "Adding user $userId to room $roomId")
                 repository.addMemberToGroup(roomId, userId)
-                loadGroupMembers(roomId)
-                // Refresh members list
+                Log.d("ADD_MEMBER", "User added successfully, refreshing members list")
+                loadGroupMembers(roomId) // Refresh members list
             } catch (e: Exception) {
+                Log.e("ADD_MEMBER", "Failed to add member: ${e.message}", e)
                 _error.value = "Failed to add member: ${e.message}"
             }
         }
@@ -554,7 +543,6 @@ override fun loadGroupMembers(roomId: String) {
             try {
                 repository.removeMemberFromGroup(roomId, userId)
                 loadGroupMembers(roomId)
-                // Refresh members list
             } catch (e: Exception) {
                 _error.value = "Failed to remove member: ${e.message}"
             }
@@ -566,7 +554,6 @@ override fun loadGroupMembers(roomId: String) {
             try {
                 repository.changeMemberRole(roomId, userId, newRole)
                 loadGroupMembers(roomId)
-                // Refresh members list
             } catch (e: Exception) {
                 _error.value = "Failed to change role: ${e.message}"
             }
@@ -592,6 +579,5 @@ override fun loadGroupMembers(roomId: String) {
             }
         }
     }
-
 
 }

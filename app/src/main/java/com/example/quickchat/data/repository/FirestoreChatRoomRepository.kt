@@ -114,7 +114,6 @@ class FirestoreChatRoomRepository @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                // Launch a coroutine to handle the database operation
                 CoroutineScope(Dispatchers.IO).launch {
                     val rooms = snapshot?.documents?.mapNotNull { doc ->
                         try {
@@ -305,7 +304,6 @@ class FirestoreChatRoomRepository @Inject constructor(
         }
     }
 
-
     override suspend fun createGroupChat(
         title: String,
         creatorId: String,
@@ -324,7 +322,6 @@ class FirestoreChatRoomRepository @Inject constructor(
             val batch = firestore.batch()
             val roomRef = firestore.collection(CHATROOMS_COLLECTION).document(roomId)
 
-            // Main room data
             val roomData = mapOf<String, Any>(
                 "title" to title,
                 "name" to title,
@@ -390,8 +387,6 @@ class FirestoreChatRoomRepository @Inject constructor(
             Result.failure(e)
         }
     }
-
-
 
 
     override suspend fun doesRoomExist(roomId: String): Boolean {
@@ -463,13 +458,11 @@ class FirestoreChatRoomRepository @Inject constructor(
                 )
                 .await()
 
-            // No need to update local DB here as the Firestore listener will handle it
         } catch (e: Exception) {
             Log.e(TAG, "Error restoring room $roomId", e)
             throw e
         }
     }
-// In FirestoreChatRoomRepository.kt
 
     override suspend fun incrementUnreadCount(roomId: String, userId: String) {
         try {
@@ -536,7 +529,6 @@ class FirestoreChatRoomRepository @Inject constructor(
         return chatRoomDao.getUnreadCountFlow(roomId, userId)
     }
 
-    // Add this to your FirestoreChatRoomRepository
     fun listenForNewMessages(
         userId: String,
         onNewMessage: (roomId: String, message: String) -> Unit
@@ -555,7 +547,6 @@ class FirestoreChatRoomRepository @Inject constructor(
                         val lastMessage = change.document.getString("lastMessage") ?: ""
                         val lastTimestamp = change.document.getLong("lastTimestamp") ?: 0L
 
-                        // Only notify if there's a new message and it's not from the current user
                         if (lastMessage.isNotEmpty() && lastTimestamp > System.currentTimeMillis() - 5000) {
                             onNewMessage(roomId, lastMessage)
                         }
@@ -600,11 +591,7 @@ class FirestoreChatRoomRepository @Inject constructor(
         }
     }
 
-
-    // link with jpin user
-// Add these to FirestoreChatRoomRepository.kt
     override suspend fun generateInviteLink(roomId: String, creatorId: String): String {
-        // Verify creator is admin of the chatroom
         val room = firestore.collection(CHATROOMS_COLLECTION)
             .document(roomId)
             .get()
@@ -638,7 +625,6 @@ class FirestoreChatRoomRepository @Inject constructor(
         userId: String
     ): Boolean {
         return try {
-            // Verify the invite
             val invite = firestore.collection("chatroom_invites")
                 .document(roomId)
                 .get()
@@ -650,7 +636,6 @@ class FirestoreChatRoomRepository @Inject constructor(
                 return false
             }
 
-            // Add user to participants
             firestore.collection(CHATROOMS_COLLECTION)
                 .document(roomId)
                 .update("participants", FieldValue.arrayUnion(userId))
@@ -671,59 +656,73 @@ class FirestoreChatRoomRepository @Inject constructor(
     }
 
 
-    //room creation
-// In FirestoreChatRoomRepository.kt
+    override fun getGroupMembers(roomId: String): Flow<List<GroupMember>> = callbackFlow {
+        Log.d("REPO_DEBUG", "Setting up real-time listener for room: $roomId")
 
+        val membersRef = firestore.collection(CHATROOMS_COLLECTION)
+            .document(roomId)
+            .collection("members")
 
-    override suspend fun getGroupMembers(roomId: String): List<GroupMember> {
-        return try {
-            Log.d("REPO_DEBUG", "Fetching members for room: $roomId")
-
-            val querySnapshot = firestore.collection(CHATROOMS_COLLECTION)
-                .document(roomId)
-                .collection("members")
-                .get()
-                .await()
-
-            Log.d("REPO_DEBUG", "Found ${querySnapshot.documents.size} member documents")
-
-            // Fetch all user details in parallel
-            val members = querySnapshot.documents.mapNotNull { doc ->
-                try {
-                    val data = doc.data ?: emptyMap()
-                    Log.d("REPO_DEBUG", "Member doc data: $data")
-
-                    // Get user details from devices collection
-                    val userDoc = firestore.collection("devices")
-                        .document(doc.id)
-                        .get()
-                        .await()
-
-                    val userName = userDoc.getString("userName") ?: "Unknown User"
-                    val deviceId = doc.id
-
-                    GroupMember(
-                        userId = deviceId,
-                        userName = userName,
-                        role = data["role"] as? String ?: "member",
-                        joinedAt = data["joinedAt"] as? Long ?: System.currentTimeMillis(),
-                        isOnline = false,
-                        isMuted = data["isMuted"] as? Boolean ?: false
-                    ).also {
-                        Log.d("REPO_DEBUG", "Mapped member: ${it.userName} (${it.userId})")
-                    }
-                } catch (e: Exception) {
-                    Log.e("REPO_ERROR", "Error mapping member doc ${doc.id}", e)
-                    null
-                }
+        val listener = membersRef.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e("REPO_ERROR", "Error listening to members", error)
+                close(error)
+                return@addSnapshotListener
             }
 
-            members
-        } catch (e: Exception) {
-            Log.e("REPO_ERROR", "Error getting group members", e)
-            throw e
+            if (snapshot != null && !snapshot.isEmpty) {
+                Log.d("REPO_DEBUG", "Snapshot received with ${snapshot.documents.size} member documents")
+
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val members = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                val data = doc.data ?: emptyMap()
+                                Log.d("REPO_DEBUG", "Member doc data: $data")
+
+                                // Get user details from devices collection
+                                val userDoc = firestore.collection("devices")
+                                    .document(doc.id)
+                                    .get()
+                                    .await()
+
+                                val userName = userDoc.getString("userName") ?: "Unknown User"
+
+                                GroupMember(
+                                    userId = doc.id,
+                                    userName = userName,
+                                    role = data["role"] as? String ?: "member",
+                                    joinedAt = data["joinedAt"] as? Long ?: System.currentTimeMillis(),
+                                    isOnline = false,
+                                    isMuted = data["isMuted"] as? Boolean ?: false
+                                ).also {
+                                    Log.d("REPO_DEBUG", "Mapped member: ${it.userName} (${it.userId})")
+                                }
+                            } catch (e: Exception) {
+                                Log.e("REPO_ERROR", "Error mapping member doc ${doc.id}", e)
+                                null
+                            }
+                        }
+
+                        Log.d("REPO_DEBUG", "Sending ${members.size} members to UI")
+                        trySend(members).isSuccess
+                    } catch (e: Exception) {
+                        Log.e("REPO_ERROR", "Error processing members", e)
+                    }
+                }
+            } else if (snapshot != null && snapshot.isEmpty) {
+                Log.d("REPO_DEBUG", "No members found in room")
+                trySend(emptyList()).isSuccess
+            }
         }
-    }    // In FirestoreChatRoomRepository.kt
+
+        awaitClose {
+            Log.d("REPO_DEBUG", "Removing listener for room: $roomId")
+            listener.remove()
+        }
+    }
+
+
     override suspend fun getAvailableUsersToAdd(roomId: String): List<User> {
         return try {
             val documents = firestore.collection("devices")
@@ -774,33 +773,39 @@ class FirestoreChatRoomRepository @Inject constructor(
 
     override suspend fun addMemberToGroup(roomId: String, userId: String) {
         try {
-            // First get user details
-            val userDoc = firestore.collection("devices").document(userId).get().await()
-            val userName = userDoc.getString("userName") ?: ""
+            Log.d("REPO_DEBUG", "Adding user $userId to room $roomId")
 
-            // Add to members list
-            firestore.collection("chatrooms").document(roomId)
-                .update(
-                    "members", FieldValue.arrayUnion(
-                        mapOf(
-                            "userId" to userId,
-                            "name" to userName,
-                            "role" to "member",
-                            "joinedAt" to System.currentTimeMillis()
-                        )
-                    )
-                )
+            // Get user details
+            val userDoc = firestore.collection("devices")
+                .document(userId)
+                .get()
                 .await()
 
-            // Also add to participants list for quick access
-            firestore.collection("chatrooms").document(roomId)
-                .update("participants", FieldValue.arrayUnion(userId))
+            val userName = userDoc.getString("userName") ?: "Unknown User"
+
+            // Add member with userName stored directly
+            val memberData = hashMapOf(
+                "userId" to userId,
+                "userName" to userName,
+                "role" to "member",
+                "joinedAt" to System.currentTimeMillis(),
+                "isMuted" to false
+            )
+
+            firestore.collection(CHATROOMS_COLLECTION)
+                .document(roomId)
+                .collection("members")
+                .document(userId)
+                .set(memberData)
                 .await()
+
+            Log.d("REPO_DEBUG", "User $userName added successfully to room $roomId")
+
         } catch (e: Exception) {
+            Log.e("REPO_ERROR", "Error adding member to group", e)
             throw e
         }
     }
-
 
     override suspend fun removeMemberFromGroup(roomId: String, userId: String) {
         try {
@@ -909,18 +914,3 @@ class FirestoreChatRoomRepository @Inject constructor(
     }
 
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

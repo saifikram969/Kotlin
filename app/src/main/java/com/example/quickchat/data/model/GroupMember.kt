@@ -6,8 +6,8 @@ data class GroupMember(
     val userName: String,
     val role: String = "member",
     val joinedAt: Long = System.currentTimeMillis(),
-    val isOnline: Boolean = false, // Add online status
-    val lastSeen: Long? = null, // Optional: last seen timestamp
+    val isOnline: Boolean = false,
+    val lastSeen: Long? = null,
     val isMuted: Boolean,
 
 )

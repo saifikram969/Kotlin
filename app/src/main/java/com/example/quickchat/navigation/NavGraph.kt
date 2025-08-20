@@ -14,12 +14,11 @@ import com.example.quickchat.presentation.screen.ChatScreen
 import com.example.quickchat.presentation.viewmodel.ChatViewModel
 
 object Routes {
-    //const val USER_SELECTION = "user_selection"
     const val NAME_DIALOG = "name_dialog/{deviceId}"
     const val CHAT_ROOMS = "chat_rooms/{userId}"
     const val CHAT_SCREEN = "chat/{currentUserId}/{roomId}/{otherUserId}"
     const val GROUP_MANAGEMENT = "group_management/{roomId}/{currentUserId}"
-    const val GROUP_INFO = "group_info/{groupId}"
+    const val GROUP_INFO = "group_info/{groupId}/{groupName}"
 
     fun nameDialogRoute(deviceId: String) = "name_dialog/$deviceId"
     fun chatRoomsRoute(userId: String) = "chat_rooms/$userId"
@@ -29,7 +28,8 @@ object Routes {
     fun groupManagementRoute(roomId: String, currentUserId: String) =
         "group_management/$roomId/$currentUserId"
 
-    fun groupInfoRoute(roomId: String) = "group_info/$roomId"
+    fun groupInfoRoute(roomId: String, groupName: String = "Group Chat") =
+        "group_info/$roomId/${groupName.replace("/", "_")}"
 }
 
 @Composable
@@ -95,8 +95,12 @@ fun ChatAppNavHost(
 
         composable(Routes.GROUP_INFO) { backStackEntry ->
             val groupId = backStackEntry.arguments?.getString("groupId") ?: ""
+            val encodedGroupName = backStackEntry.arguments?.getString("groupName") ?: "Group Chat"
+            val groupName = encodedGroupName.replace("_", "/")
+
             GroupInfoScreen(
                 groupId = groupId,
+                groupName = groupName,
                 onBackClick = { navController.popBackStack() },
                 onGroupManagementClick = { roomId, currentUserId ->
                     navController.navigate(Routes.groupManagementRoute(roomId, currentUserId))

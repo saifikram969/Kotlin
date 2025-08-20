@@ -60,8 +60,6 @@ class PresenceRepositoryImpl @Inject constructor(
         // Presence will be updated when activity resumes
     }
 
-
-
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
 
     override fun onActivityStarted(activity: Activity) {
@@ -89,7 +87,6 @@ class PresenceRepositoryImpl @Inject constructor(
     }
 
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-
     override fun onActivityDestroyed(activity: Activity) {}
 
     override suspend fun updateUserPresence(userId: String, isOnline: Boolean) {
@@ -107,16 +104,13 @@ class PresenceRepositoryImpl @Inject constructor(
     }
 
     override fun observeUserPresence(userId: String): Flow<Boolean> = callbackFlow {
-        // 1. Add validation for user ID
         if (userId.isBlank()) {
             close(IllegalArgumentException("User ID cannot be empty"))
             return@callbackFlow
         }
 
-        // 2. Add logging for debugging
         println("Observing presence for user: $userId")
 
-        // 3. Safely create document reference
         val docRef = try {
             presenceCollection.document(userId)
         } catch (e: IllegalArgumentException) {
@@ -132,19 +126,18 @@ class PresenceRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 snapshot == null || !snapshot.exists() -> {
-                    trySend(false) // Default to offline if no snapshot
+                    trySend(false)
                 }
                 else -> {
                     val isOnline = snapshot.getBoolean("isOnline") ?: false
                     val sendResult = trySend(isOnline)
                     if (sendResult.isFailure) {
-                        close() // Close if channel is full or cancelled
+                        close()
                     }
                 }
             }
         }
 
-        // 5. Handle coroutine cancellation
         awaitClose {
             listener.remove()
             println("Presence observation stopped for user: $userId")
@@ -181,7 +174,5 @@ class PresenceRepositoryImpl @Inject constructor(
             }
         awaitClose { listener.remove() }
     }
-
-
 
 }
