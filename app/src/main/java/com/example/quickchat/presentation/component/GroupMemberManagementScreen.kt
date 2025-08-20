@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,7 +73,6 @@ fun GroupMemberManagementScreen(
     val availableUsers by viewModel.availableUsers.collectAsState()
     val presenceStatus by viewModel.presenceStatus.collectAsState()
 
-
     // Load members when screen opens
     LaunchedEffect(roomId) {
         viewModel.loadGroupMembers(roomId)
@@ -127,7 +127,10 @@ fun GroupMemberManagementScreen(
                         isOnline = member.isOnline,
                         onRemove = { viewModel.removeMember(roomId, member.userId) },
                         onMakeAdmin = { viewModel.changeMemberRole(roomId, member.userId, "admin") },
-                        onRemoveAdmin = { viewModel.changeMemberRole(roomId, member.userId, "member") }
+                        onRemoveAdmin = { viewModel.changeMemberRole(roomId, member.userId, "member") },
+                        onLongPress = { selectedMember ->
+                            // Long press handled in the item itself
+                        }
                     )
                 }
             }
@@ -177,7 +180,7 @@ fun GroupMemberManagementScreen(
         TransferOwnershipDialog(
             members = members.filter { it.userId != currentUserId },
             onTransfer = { newAdminId ->
-                viewModel.transferOwnership(roomId, currentUserId)
+                viewModel.transferOwnership(roomId, newAdminId)
                 viewModel.leaveGroup(roomId)
                 showTransferDialog = false
                 onBackClick()
@@ -194,14 +197,46 @@ fun GroupMemberItem(
     isOnline: Boolean,
     onRemove: () -> Unit,
     onMakeAdmin: () -> Unit,
-    onRemoveAdmin: () -> Unit
+    onRemoveAdmin: () -> Unit,
+    onLongPress: (GroupMember) -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var showLongPressMenu by remember { mutableStateOf(false) }
+
+    if (showLongPressMenu) {
+        GroupMemberLongPressMenu(
+            member = member,
+            isAdmin = isAdmin,
+            currentUserId = currentUserId,
+            onDismiss = { showLongPressMenu = false },
+            onMakeAdmin = {
+                onMakeAdmin()
+                showLongPressMenu = false
+            },
+            onRemoveAdmin = {
+                onRemoveAdmin()
+                showLongPressMenu = false
+            },
+            onRemoveMember = {
+                onRemove()
+                showLongPressMenu = false
+            }
+        )
+    }
+
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
+            .combinedClickable(
+                onClick = { /* Regular click behavior */ },
+                onLongClick = {
+                    if (isAdmin && member.userId != currentUserId) {
+                        showLongPressMenu = true
+                    }
+                }
+            )
     ) {
         Row(
             modifier = Modifier.padding(16.dp),

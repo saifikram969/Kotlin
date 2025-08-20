@@ -2,6 +2,7 @@ package com.example.quickchat.presentation.component
 
 
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,8 +15,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -23,6 +28,8 @@ import com.example.quickchat.data.model.GroupMember
 import com.example.quickchat.presentation.viewmodel.ChatRoomListViewModel
 import com.example.quickchat.presentation.viewmodel.GroupInfoViewModel
 import org.koin.androidx.compose.koinViewModel
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,10 +42,20 @@ fun GroupInfoScreen(
     val members by viewModel.groupMembers.collectAsState()
     val presenceStatus by viewModel.presenceStatus.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val context = LocalContext.current
 
-    LaunchedEffect(groupId) {
+    // State for showing add member dialog
+    var showAddMemberDialog by remember { mutableStateOf(false) }
+    val availableUsers by viewModel.availableUsers.collectAsState()
+    val isLoadingUsers by viewModel.isLoadingUsers.collectAsState()
+
+    // In GroupInfoScreen.kt
+    LaunchedEffect(groupId, members) { // Add members as dependency
         if (groupId.isNotBlank()) {
-            viewModel.loadGroupMembers(groupId)
+            if (members.isEmpty()) {
+                viewModel.loadGroupMembers(groupId)
+            }
+            viewModel.loadAvailableUsers(groupId)
         }
     }
 
@@ -86,7 +103,7 @@ fun GroupInfoScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Group Chat", // You can make this dynamic if you store group title
+                        text = "Group Chat",
                         style = MaterialTheme.typography.titleLarge
                     )
 
@@ -101,18 +118,20 @@ fun GroupInfoScreen(
             }
 
             item {
-                // Group management button
-                Button(
-                    onClick = {
-                        // Get current user ID from members
-                        val currentUserId = members.firstOrNull { it.role == "admin" }?.userId ?: ""
-                        onGroupManagementClick(groupId, currentUserId)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Text("Manage Group Members")
+                // Check if current user is admin to show add members button
+                val isAdmin = members.any { it.role == "admin" } // You need to pass actual current user ID here
+
+                if (isAdmin) {
+                    Button(
+                        onClick = {
+                            showAddMemberDialog = true
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text("Add Members")
+                    }
                 }
             }
 
@@ -148,16 +167,42 @@ fun GroupInfoScreen(
                         member = member.copy(
                             isOnline = presenceStatus[member.userId] ?: false
                         ),
-                        isAdmin = false,
-                        currentUserId = "",
+                        isAdmin = members.any { it.role == "admin" }, // Check if current user is admin
+                        currentUserId = "", // You need to pass the actual current user ID here
                         isOnline = presenceStatus[member.userId] ?: false,
-                        onRemove = {},
-                        onMakeAdmin = {},
-                        onRemoveAdmin = {}
+                        onRemove = {
+                            // Implement remove functionality
+                            viewModel.removeMember(groupId, member.userId)
+                        },
+                        onMakeAdmin = {
+                            // Implement make admin functionality
+                            viewModel.changeMemberRole(groupId, member.userId, "admin")
+                        },
+                        onRemoveAdmin = {
+                            // Implement remove admin functionality
+                            viewModel.changeMemberRole(groupId, member.userId, "member")
+                        },
+                        onLongPress = { selectedMember ->
+                            // Long press handled in the item itself
+                        }
                     )
                 }
             }
         }
+    }
+
+    // Add Member Dialog
+    if (showAddMemberDialog) {
+        MemberSelectionDialog(
+            isLoading = isLoadingUsers,
+            availableUsers = availableUsers,
+            selectedUsers = emptyList(), // No pre-selected users for adding
+            onUserSelected = { user ->
+                viewModel.addMember(groupId, user.deviceId)
+                showAddMemberDialog = false
+            },
+            onDismiss = { showAddMemberDialog = false }
+        )
     }
 }
 
