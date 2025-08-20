@@ -1,3 +1,45 @@
+## Week 4 Task - Group Chat & Membership Management
+
+### Problem Statement
+i'm facing big issue schema update because project strucutre is different this task challenging because how to store the users without authentication 
+and a lot of refactoring.
+
+### Solution Overview
+Implemented a file attachment system that:
+1. User get Witohut auth:
+2. Schema update Chatrooms. {roomId}/ { type : group/dm} and {title}
+3. Room/dm Creation: 
+4. Group info Screen:
+
+
+## Key Technical Decisions
+
+### 1.User get without auth
+  using dialog if user install the first  time  ahow the dialouges   only once time then user input the name gotcha username stored in firestore
+  without using authentication getting all users it is only testing purpose if need authentication we implemented.
+    
+ ### 2. Room/dm Creation
+i'm adding fab button user click the fab button open the card with animated and you can click the add members using  getAllMembers() function
+and also add validation you can without name you can't create the group.
+
+ ### 3. Group info Screen
+showing all members with online badge and admin badge and also add members button you can add any members and showing only user who are not members in this group and also you remove any members this power only used admin  
+
+
+    
+### Demo
+(https://drive.google.com/file/d/1hGdAvC8S1Qpo0obb_7uA3NMhSJ6lsj7o/view?usp=sharing)  
+
+
+- Files updated:
+  - `ChatScreen.kt`
+  - `GrooupINfoScreen.kt`
+  - `GroupInforViewModel.kt`
+
+
+### EOD 21-8-25 ###
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ## Week 3 Task - Message Attachments Implementation
 
 ### Problem Statement
